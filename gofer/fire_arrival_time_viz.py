@@ -5,18 +5,26 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import pickle
 import numpy as np
+from .tilers import CartoDBTiles
 
-# NOTE import CartoDBTiles
+with open('temp/filelist.pkl', 'rb') as f:
+    goes_files = pickle.load(f)
+    west_files = goes_files['west']
+    east_files = goes_files['east']
+    dates = goes_files['dates']
+    outages = goes_files['outages']
+    extent = goes_files['extent']
+    area_id = goes_files['area_id']
 
 combined_ds = xr.open_dataset('temp/bobcat_max_combined.nc')
 buffer = 0.1 # 11.1km buffer, since exact buffer might truncate
-extent = [
-    -118.104477 - buffer,
-    -117.766454 + buffer,
-    34.165593 - buffer,
-    34.483925 + buffer
-]
 lon_min, lon_max, lat_min, lat_max = extent
+extent = [
+    lon_min - buffer,
+    lon_max + buffer,
+    lat_min - buffer,
+    lat_max + buffer
+]
 
 plot_shared_kwargs = {
     'transform' : ccrs.PlateCarree(),
@@ -25,13 +33,6 @@ plot_shared_kwargs = {
     'vmax' : 1.0,
     'add_colorbar' : False
 }
-
-with open('temp/filelist.pkl', 'rb') as f:
-    goes_files = pickle.load(f)
-    west_files = goes_files['west']
-    east_files = goes_files['east']
-    dates = goes_files['dates']
-    outages = goes_files['outages']
 
 # merge into one array
 # NOTE need to verify this...

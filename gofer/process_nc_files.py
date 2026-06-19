@@ -10,10 +10,9 @@ from satpy.area import get_area_def
 from pyresample import create_area_def
 import logging
 import numpy as np
+from .tilers import CartoDBTiles
 
 logging.basicConfig(level=logging.ERROR)
-
-# NOTE import CartoDBTiles
 
 def plot(scn_west, scn_east, scn_merged, date, i, save_dir):
     fig, axes = plt.subplots(
@@ -261,13 +260,16 @@ with open('temp/filelist.pkl', 'rb') as f:
     east_files = goes_files['east']
     dates = goes_files['dates']
     outages = goes_files['outages']
+    extent = goes_files['extent']
+    area_id = goes_files['area_id']
 
 buffer = 0.1 # 11.1km buffer, since exact extent risks a truncation
+lon_min, lon_max, lat_min, lat_max = extent
 extent = [
-    -118.104477 - buffer,
-    -117.766454 + buffer,
-    34.165593 - buffer,
-    34.483925 + buffer
+    lon_min - buffer,
+    lon_max + buffer,
+    lat_min - buffer,
+    lat_max + buffer
 ]
-fire_stack = geolocate(west_files, east_files, dates, area_id='los_angeles', extent=extent, plot_imgs=True)
+fire_stack = geolocate(west_files, east_files, dates, area_id=area_id, extent=extent, plot_imgs=True)
 combined_ds = combined_dataset(fire_stack, "temp/bobcat_max_combined.nc")

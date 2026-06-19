@@ -169,6 +169,13 @@ for d in (pbar := tqdm(dates)):
 
 # need logic to handle missing frames (either one or both)
 outages = get_outages(east_files, west_files, dates)
+area_id = 'los_angeles_bobcat'
+extent = (
+    bobcat_fire['bbox_min_lon'].item(),
+    bobcat_fire['bbox_max_lon'].item(),
+    bobcat_fire['bbox_min_lat'].item(),
+    bobcat_fire['bbox_max_lat'].item()
+)
 
 pkl_filepath = 'filelist.pkl'
 tqdm.write(f'Saving west/east filepaths, dates, and outages to {pkl_filepath}')
@@ -177,6 +184,8 @@ with open(pkl_filepath, 'wb') as f:
         'west' : west_files,
         'east' : east_files,
         'dates' : dates,
-        'outages' : outages
+        'outages' : outages,
+        'area_id' : area_id,
+        'extent' : extent
     }
     pickle.dump(pkg, f)

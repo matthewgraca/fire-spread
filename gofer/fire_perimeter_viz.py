@@ -6,18 +6,26 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import pickle
 from tqdm import tqdm
+from .tilers import CartoDBTiles
 
-# NOTE import CartoDBTiles
+with open('temp/filelist.pkl', 'rb') as f:
+    goes_files = pickle.load(f)
+    west_files = goes_files['west']
+    east_files = goes_files['east']
+    dates = goes_files['dates']
+    outages = goes_files['outages']
+    extent = goes_files['extent']
+    area_id = goes_files['area_id']
 
 combined_ds = xr.open_dataset('temp/bobcat_max_combined.nc')
 buffer = 0.1 # 11.1km buffer, since exact buffer might truncate
-extent = [
-    -118.104477 - buffer,
-    -117.766454 + buffer,
-    34.165593 - buffer,
-    34.483925 + buffer
-]
 lon_min, lon_max, lat_min, lat_max = extent
+extent = [
+    lon_min - buffer,
+    lon_max + buffer,
+    lat_min - buffer,
+    lat_max + buffer
+]
 
 plot_shared_kwargs = {
     'transform' : ccrs.PlateCarree(),
@@ -27,14 +35,6 @@ plot_shared_kwargs = {
     'add_colorbar' : False
 }
 
-with open('temp/filelist.pkl', 'rb') as f:
-    goes_files = pickle.load(f)
-    west_files = goes_files['west']
-    east_files = goes_files['east']
-    dates = goes_files['dates']
-    outages = goes_files['outages']
-
-# NOTE gif of fire perimeter progression?
 time_start = combined_ds["time"].coarsen(time=12, boundary="trim").min()
 time_end = combined_ds["time"].coarsen(time=12, boundary="trim").max()
 # groups into non-overlapping 12 frame chunks
