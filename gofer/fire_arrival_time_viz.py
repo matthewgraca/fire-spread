@@ -16,7 +16,7 @@ with open('temp/filelist.pkl', 'rb') as f:
     extent = goes_files['extent']
     area_id = goes_files['area_id']
 
-combined_ds = xr.open_dataset('temp/bobcat_max_combined.nc')
+combined_ds = xr.open_dataset('temp/bobcat.nc')
 buffer = 0.1 # 11.1km buffer, since exact buffer might truncate
 lon_min, lon_max, lat_min, lat_max = extent
 extent = [

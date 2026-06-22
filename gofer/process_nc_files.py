@@ -10,11 +10,13 @@ from satpy.area import get_area_def
 from pyresample import create_area_def
 import logging
 import numpy as np
-from .tilers import CartoDBTiles
+from pathlib import Path
+from tilers import CartoDBTiles
 
 logging.basicConfig(level=logging.ERROR)
 
 def plot(scn_west, scn_east, scn_merged, date, i, save_dir):
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(
         1, 3,
         figsize=(16, 6),
@@ -71,7 +73,7 @@ def plot(scn_west, scn_east, scn_merged, date, i, save_dir):
         f'\nProgression: {i+1} / {len(dates)}'
         f'\n'
     )
-    plt.savefig(f'bobcat_imgs/{date.strftime("%Y-%m-%d_%H-%M-%S")}.png')
+    plt.savefig(f'{save_dir}/{date.strftime("%Y-%m-%d_%H-%M-%S")}.png')
     plt.close()
 
 def add_mask_confidence(scene):
@@ -150,6 +152,7 @@ def combine_dataset(stack, save_path=None):
     ).to_dataset()
 
     if save_path:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         combined_ds.to_netcdf(
             save_path,
             engine="netcdf4",
@@ -191,8 +194,6 @@ def process_scene(file, target_area):
 
     return scn
 
-# NOTE extent should be saved to pkl file
-# NOTE area_id should be saved to pkl file
 def geolocate(west_files, east_files, dates, area_id, extent, plot_imgs):
     lon_min, lon_max, lat_min, lat_max = extent
     dlon, dlat = (0.01, 0.01) # native res ~ 0.02
@@ -272,4 +273,4 @@ extent = [
     lat_max + buffer
 ]
 fire_stack = geolocate(west_files, east_files, dates, area_id=area_id, extent=extent, plot_imgs=True)
-combined_ds = combined_dataset(fire_stack, "temp/bobcat_max_combined.nc")
+combined_ds = combine_dataset(fire_stack, "temp/bobcat.nc")

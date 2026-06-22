@@ -1,7 +1,7 @@
 import pandas as pd
 import geopandas as gpd
 import pickle
-
+from pathlib import Path
 from goes2go.data import goes_nearesttime
 from tqdm import tqdm
 import contextlib
@@ -87,7 +87,7 @@ print(temp_gdf.columns)
        'centroid_lat']
 '''
 trimmed_cols = [
-    'YEAR_', 'FIRE_NAME', 'ALARM_DATE',
+    'FIRE_NAME', 'ALARM_DATE',
     'CONT_DATE', 'GIS_ACRES', 'COMPLEX_NAME', 'geometry', 'bbox_min_lon',
     'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
     'centroid_lat'
@@ -100,6 +100,23 @@ print(bobcat_fire)
 
 # INGESTION
 def ingest(date, satellite, product, domain, save_dir, verbose, silent):
+    '''
+    Ingests the GOES-West and GOES-East data from NOAA's AWS bucket.
+
+    Args:
+        date (datetime64[ns]): The date, where the nearest observation will be 
+            taken.
+        satellite (str): The satellite to grab the data from.
+        product (str): The specific GOES product to be grabbed.
+        domain (str): The domain (mesoscale, conus, full disk).
+        save_dir (str): The directory the data will be saved to.
+        verbose (bool): Verbosity.
+        silent (bool): Whether to silence the goes2go messages (they can get 
+            annoyingly loud).
+
+    Returns:
+        str: The path the file was downloaded.
+    '''
     nearest_time_kwargs = {
         'attime' : date,
         'satellite' : satellite,
@@ -125,7 +142,7 @@ def ingest(date, satellite, product, domain, save_dir, verbose, silent):
         g = goes_nearesttime(**nearest_time_kwargs)
         file = g['file'].item()
 
-    return file
+    return str(Path(save_dir) / Path(file))
 
 def get_outages(east, west, dates):
     if len(east) != len(west) != len(dates):
@@ -138,9 +155,9 @@ def get_outages(east, west, dates):
         'WEST' : []
     }
     for e, w, d in zip(east, west, dates):
-        if not e:
+        if not Path(e).is_file():
             outages['EAST'].append(d)
-        if not w:
+        if not Path(w).is_file():
             outages['WEST'].append(d)
 
     return outages
@@ -152,7 +169,7 @@ dates = pd.date_range(
     freq='h',
     inclusive='left'
 ).tz_localize(None)
-goes_save_dir = '/home/mgraca/Workspace/goes-projection'
+goes_save_dir = '/home/mgraca/Workspace/fire-spread/gofer/data'
 goes_kwargs = {
     'product' : 'ABI-L2-FDCC',
     'domain' : 'C',
@@ -177,7 +194,8 @@ extent = (
     bobcat_fire['bbox_max_lat'].item()
 )
 
-pkl_filepath = 'filelist.pkl'
+pkl_filepath = 'temp/filelist.pkl'
+Path(pkl_filepath).parent.mkdir(parents=True, exist_ok=True)
 tqdm.write(f'Saving west/east filepaths, dates, and outages to {pkl_filepath}')
 with open(pkl_filepath, 'wb') as f:
     pkg = {
