@@ -65,6 +65,7 @@ def add_fire_bboxes(gdf: gpd.GeoDataFrame):
 GeoJSON data found at:
 https://data.ca.gov/dataset/california-fire-perimeters-1950
 '''
+# NOTE param
 calfire_geojson_path = "calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
 gdf = gpd.read_file(calfire_geojson_path)
 
@@ -169,6 +170,7 @@ dates = pd.date_range(
     freq='h',
     inclusive='left'
 ).tz_localize(None)
+# NOTE param
 goes_save_dir = '/home/mgraca/Workspace/fire-spread/gofer/data'
 goes_kwargs = {
     'product' : 'ABI-L2-FDCC',
@@ -194,6 +196,7 @@ extent = (
     bobcat_fire['bbox_max_lat'].item()
 )
 
+# NOTE param
 pkl_filepath = 'temp/filelist.pkl'
 Path(pkl_filepath).parent.mkdir(parents=True, exist_ok=True)
 tqdm.write(f'Saving west/east filepaths, dates, and outages to {pkl_filepath}')
