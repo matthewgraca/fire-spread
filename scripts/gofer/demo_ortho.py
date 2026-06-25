@@ -23,7 +23,6 @@ gif_path = make_original_vs_terrain_corrected_gif(
     ortho_ds=ortho_ds,
     variable="Rad",
     output_gif=out,
-    extent=[-120.25, -118.75, 37.25, 38.50],
     cmap="gray",
     duration_ms=900,
 )

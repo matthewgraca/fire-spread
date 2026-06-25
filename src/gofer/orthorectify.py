@@ -5,7 +5,7 @@ import rioxarray
 import xarray as xr
 from gofer.goes_utils import get_projection_params, vars_with_xy_dims
 
-def _lonlat_to_abi_scan_angles(
+def lonlat_to_abi_scan_angles(
     lon_deg: np.ndarray,
     lat_deg: np.ndarray,
     elevation_m: np.ndarray,
@@ -123,7 +123,7 @@ def _make_ortho_map(
     lon_2d, lat_2d = np.meshgrid(dem["x"].values, dem["y"].values)
     elevation = dem.values
 
-    abi_x, abi_y = _lonlat_to_abi_scan_angles(
+    abi_x, abi_y = lonlat_to_abi_scan_angles(
         lon_2d,
         lat_2d,
         elevation,

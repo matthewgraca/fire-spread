@@ -1,109 +1,133 @@
 import xarray as xr
 import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import numpy as np
-import imageio.v2 as imageio
 from PIL import Image
 from pathlib import Path
+from gofer.goes_utils import get_projection_params
+from gofer.orthorectify import lonlat_to_abi_scan_angles
 
-def _get_goes_cartopy_crs(goes_ds):
-    proj = goes_ds["goes_imager_projection"]
+def make_uncorrected_on_ortho_grid(
+    goes_filepath: str,
+    ortho_ds: xr.Dataset,
+    variable: str = "Rad",
+) -> xr.DataArray:
+    """
+    Sample original GOES data onto the orthorectified lat/lon grid
+    without terrain correction.
 
-    semi_major_axis = float(proj.attrs["semi_major_axis"])
-    semi_minor_axis = float(proj.attrs["semi_minor_axis"])
-    perspective_point_height = float(proj.attrs["perspective_point_height"])
-    lon_origin = float(proj.attrs["longitude_of_projection_origin"])
-    sweep_axis = proj.attrs.get("sweep_angle_axis", "x")
+    This creates a fair 'Original' comparison frame on the same grid as
+    the terrain-corrected output.
+    """
+    goes_ds = xr.open_dataset(goes_filepath, decode_times=False)
 
-    return ccrs.Geostationary(
-        central_longitude=lon_origin,
-        satellite_height=perspective_point_height,
-        globe=ccrs.Globe(
-            semimajor_axis=semi_major_axis,
-            semiminor_axis=semi_minor_axis,
-        ),
-        sweep_axis=sweep_axis,
+    params = get_projection_params(goes_ds)
+
+    lon_2d, lat_2d = np.meshgrid(
+        ortho_ds["longitude"].values,
+        ortho_ds["latitude"].values,
     )
 
+    zero_elevation = np.zeros_like(lon_2d, dtype="float64")
 
-def _add_goes_xy_meters(goes_ds):
-    """
-    Add Cartopy-compatible projected x/y coordinates in meters.
-
-    GOES ABI x/y coordinates are scan angles in radians.
-    Cartopy Geostationary expects projection coordinates in meters.
-    """
-    h = float(
-        goes_ds["goes_imager_projection"].attrs["perspective_point_height"]
+    flat_x, flat_y = lonlat_to_abi_scan_angles(
+        lon_2d,
+        lat_2d,
+        zero_elevation,
+        satellite_height=params["satellite_height"],
+        semi_major_axis=params["semi_major_axis"],
+        semi_minor_axis=params["semi_minor_axis"],
+        eccentricity=params["eccentricity"],
+        longitude_of_projection_origin=params[
+            "longitude_of_projection_origin"
+        ],
     )
 
-    return goes_ds.assign_coords(
-        x_m=("x", goes_ds["x"].values * h),
-        y_m=("y", goes_ds["y"].values * h),
+    flat_map = xr.Dataset(
+        coords={
+            "longitude": ortho_ds["longitude"],
+            "latitude": ortho_ds["latitude"],
+            "flat_px_angle_x": (("latitude", "longitude"), flat_x),
+            "flat_px_angle_y": (("latitude", "longitude"), flat_y),
+        }
     )
 
+    sampled = goes_ds[variable].sel(
+        x=flat_map["flat_px_angle_x"],
+        y=flat_map["flat_px_angle_y"],
+        method="nearest",
+    )
 
-def _fig_to_rgb_array(fig):
-    """
-    Convert a Matplotlib figure to an RGB numpy array.
-    """
-    fig.canvas.draw()
-    w, h = fig.canvas.get_width_height()
-    buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-    return buf.reshape(h, w, 3)
+    valid = (
+        (flat_map["flat_px_angle_x"] >= goes_ds["x"].min()) &
+        (flat_map["flat_px_angle_x"] <= goes_ds["x"].max()) &
+        (flat_map["flat_px_angle_y"] >= goes_ds["y"].min()) &
+        (flat_map["flat_px_angle_y"] <= goes_ds["y"].max())
+    )
 
+    sampled = sampled.where(valid)
 
-def _save_frame(
+    sampled.name = f"{variable}_original_on_latlon_grid"
+    sampled.attrs.update(goes_ds[variable].attrs)
+    sampled.attrs["terrain_corrected"] = "false"
+    sampled.attrs["description"] = (
+        "Original GOES data sampled onto the orthorectified lat/lon grid "
+        "using zero elevation."
+    )
+
+    goes_ds.close()
+
+    return sampled
+
+def _save_plain_latlon_frame(
     da,
     *,
-    label,
     output_png,
-    x,
-    y,
-    transform,
-    extent,
-    cmap,
-    vmin,
-    vmax,
+    label,
+    cmap="gray",
+    vmin=None,
+    vmax=None,
     title=None,
 ):
     """
-    Save one map frame as a PNG.
-    """
-    fig = plt.figure(figsize=(8, 7), dpi=140)
-    ax = plt.axes(projection=ccrs.PlateCarree())
+    Save a lat/lon gridded DataArray as a plain Matplotlib image.
 
-    da.plot.pcolormesh(
-        ax=ax,
-        x=x,
-        y=y,
-        transform=transform,
+    No Cartopy, no Shapely, no GeoAxes.
+    """
+    lon = da["longitude"].values
+    lat = da["latitude"].values
+    data = da.values
+
+    extent = [
+        float(np.nanmin(lon)),
+        float(np.nanmax(lon)),
+        float(np.nanmin(lat)),
+        float(np.nanmax(lat)),
+    ]
+
+    # Many rasters have latitude descending.
+    origin = "upper" if lat[0] > lat[-1] else "lower"
+
+    fig, ax = plt.subplots(figsize=(8, 7), dpi=140)
+
+    im = ax.imshow(
+        data,
+        extent=extent,
+        origin=origin,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        add_colorbar=False,
+        interpolation="nearest",
+        aspect="auto",
     )
 
-    ax.set_extent(extent, crs=ccrs.PlateCarree())
-    ax.coastlines(resolution="10m", linewidth=0.8)
-    ax.add_feature(cfeature.STATES, linewidth=0.4)
-
-    gl = ax.gridlines(
-        draw_labels=True,
-        linewidth=0.3,
-        alpha=0.5,
-        linestyle="--",
-    )
-    gl.top_labels = False
-    gl.right_labels = False
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
 
     if title is not None:
         ax.set_title(title)
 
-    # Large label on image
     ax.text(
-        0.01,
+        0.03,
         0.1,
         label,
         transform=ax.transAxes,
@@ -119,101 +143,61 @@ def _save_frame(
         },
     )
 
-    plt.tight_layout()
-    fig.savefig(output_png, bbox_inches="tight")
+    fig.savefig(output_png, bbox_inches='tight')
     plt.close(fig)
 
-# NOTE grab the folders before the file to save it in the desired location
 def make_original_vs_terrain_corrected_gif(
-    goes_filepath,
-    ortho_ds,
-    variable="Rad",
-    output_gif="goes_terrain_correction_comparison.gif",
-    extent=None,
-    cmap="gray",
-    duration_ms=800,
+    goes_filepath: str,
+    ortho_ds: xr.Dataset,
+    variable: str = "Rad",
+    output_gif: str = "goes_original_vs_terrain_corrected.gif",
+    cmap: str = "gray",
+    duration_ms: int = 900,
 ):
     """
-    Create a GIF cycling between original GOES fixed-grid data and
-    terrain-corrected orthorectified GOES data.
+    Create a GIF cycling between:
+      1. Original GOES sampled to the lat/lon grid with zero elevation.
+      2. Terrain-corrected GOES from orthorectify().
 
-    Parameters
-    ----------
-    goes_filepath : str
-        Path to the original GOES netCDF file.
-
-    ortho_ds : xr.Dataset
-        Dataset returned by orthorectify().
-
-    variable : str
-        Variable to plot, for example "Rad" or "CMI".
-
-    output_gif : str
-        Output GIF filename.
-
-    extent : list or tuple, optional
-        Cartopy extent in lon/lat order:
-
-            [min_lon, max_lon, min_lat, max_lat]
-
-        If omitted, uses the orthorectified dataset bounds.
-
-    cmap : str
-        Matplotlib colormap.
-
-    duration_ms : int
-        Duration of each GIF frame in milliseconds.
-
-    Returns
-    -------
-    str
-        Path to the saved GIF.
+    This avoids Cartopy entirely, preventing Shapely/GEOS savefig errors.
     """
-    goes_ds = xr.open_dataset(goes_filepath, decode_times=False)
-    goes_ds = _add_goes_xy_meters(goes_ds)
-    goes_crs = _get_goes_cartopy_crs(goes_ds)
+    original_da = make_uncorrected_on_ortho_grid(
+        goes_filepath=goes_filepath,
+        ortho_ds=ortho_ds,
+        variable=variable,
+    )
 
-    if extent is None:
-        extent = [
-            float(ortho_ds.longitude.min()),
-            float(ortho_ds.longitude.max()),
-            float(ortho_ds.latitude.min()),
-            float(ortho_ds.latitude.max()),
+    terrain_da = ortho_ds[variable]
+
+    # Shared color limits.
+    both = np.concatenate(
+        [
+            original_da.values[np.isfinite(original_da.values)].ravel(),
+            terrain_da.values[np.isfinite(terrain_da.values)].ravel(),
         ]
+    )
 
-    # Use the orthorectified subset for shared local contrast.
-    plot_values = ortho_ds[variable].where(np.isfinite(ortho_ds[variable]))
-    vmin, vmax = np.nanpercentile(plot_values.values, [2, 98])
+    vmin, vmax = np.nanpercentile(both, [2, 98])
 
     output_dir = Path(output_gif).parent
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    original_png = str(output_dir / Path("_goes_original_frame.png"))
-    terrain_png = str(output_dir / Path("_goes_terrain_corrected_frame.png"))
+    original_png = str(output_dir / Path("_frame_original.png"))
+    terrain_png = str(output_dir / Path("_frame_terrain_corrected.png"))
 
-    print('Creating frames (this will take a bit of time...)')
-
-    _save_frame(
-        goes_ds[variable],
-        label="Original",
+    _save_plain_latlon_frame(
+        original_da,
         output_png=original_png,
-        x="x_m",
-        y="y_m",
-        transform=goes_crs,
-        extent=extent,
+        label="Original",
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        title="Original GOES Fixed Grid",
+        title="Original GOES, sampled to lat/lon grid",
     )
 
-    _save_frame(
-        ortho_ds[variable],
-        label="Terrain Corrected",
+    _save_plain_latlon_frame(
+        terrain_da,
         output_png=terrain_png,
-        x="longitude",
-        y="latitude",
-        transform=ccrs.PlateCarree(),
-        extent=extent,
+        label="Terrain Corrected",
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
@@ -231,13 +215,6 @@ def make_original_vs_terrain_corrected_gif(
         append_images=frames[1:],
         duration=duration_ms,
         loop=0,
-    )
-
-    print(
-        f'Complete! Saved to \n'
-        f'\t{original_png}\n'
-        f'\t{terrain_png}\n'
-        f'\t{output_gif}'
     )
 
     return output_gif
