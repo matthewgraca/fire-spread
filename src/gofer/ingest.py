@@ -66,7 +66,7 @@ GeoJSON data found at:
 https://data.ca.gov/dataset/california-fire-perimeters-1950
 '''
 # NOTE param
-calfire_geojson_path = "calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
+calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
 gdf = gpd.read_file(calfire_geojson_path)
 
 big_fires = gdf[
@@ -87,6 +87,7 @@ print(temp_gdf.columns)
        'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
        'centroid_lat']
 '''
+metadata_cols = ['FIRE_NAME', 'YEAR_', 'GIS_ACRES']
 trimmed_cols = [
     'FIRE_NAME', 'ALARM_DATE',
     'CONT_DATE', 'GIS_ACRES', 'COMPLEX_NAME', 'geometry', 'bbox_min_lon',
@@ -97,7 +98,6 @@ trimmed_cols = [
 # NOTE this is where you select the fire you want. we do it by name, but we can change the method by which we grab fires
 # like a whole dataframe, then iterate through them for the ingestion portion
 bobcat_fire = temp_gdf.loc[temp_gdf['FIRE_NAME'] == 'BOBCAT']
-print(bobcat_fire)
 
 # INGESTION
 def ingest(date, satellite, product, domain, save_dir, verbose, silent):
@@ -171,7 +171,7 @@ dates = pd.date_range(
     inclusive='left'
 ).tz_localize(None)
 # NOTE param
-goes_save_dir = '/home/mgraca/Workspace/fire-spread/gofer/data'
+goes_save_dir = '/home/mgraca/Workspace/fire-spread/data/goes'
 goes_kwargs = {
     'product' : 'ABI-L2-FDCC',
     'domain' : 'C',
@@ -188,7 +188,6 @@ for d in (pbar := tqdm(dates)):
 
 # need logic to handle missing frames (either one or both)
 outages = get_outages(east_files, west_files, dates)
-area_id = 'los_angeles_bobcat'
 extent = (
     bobcat_fire['bbox_min_lon'].item(),
     bobcat_fire['bbox_max_lon'].item(),
@@ -206,7 +205,14 @@ with open(pkl_filepath, 'wb') as f:
         'east' : east_files,
         'dates' : dates,
         'outages' : outages,
-        'area_id' : area_id,
-        'extent' : extent
+        'metadata' : {
+            'name' : str(bobcat_fire['FIRE_NAME'].item()),
+            'year' : int(bobcat_fire['YEAR_'].item()),
+            'acres' : int(bobcat_fire['GIS_ACRES'].item())
+        },
+        'lon_min' : float(bobcat_fire['bbox_min_lon'].item()),
+        'lon_max' : float(bobcat_fire['bbox_max_lon'].item()),
+        'lat_min' : float(bobcat_fire['bbox_min_lat'].item()),
+        'lat_max' : float(bobcat_fire['bbox_max_lat'].item())
     }
     pickle.dump(pkg, f)

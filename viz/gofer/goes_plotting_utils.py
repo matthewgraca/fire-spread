@@ -10,6 +10,9 @@ def get_goes_cartopy_crs(goes_ds: xr.Dataset) -> ccrs.Geostationary:
     """
     Build a Cartopy Geostationary CRS from a native GOES ABI Dataset.
     """
+    if "goes_imager_projection" not in goes_ds:
+        raise ValueError("Dataset is missing `goes_imager_projection`.")
+
     proj = goes_ds["goes_imager_projection"]
 
     semi_major_axis = float(proj.attrs["semi_major_axis"])
@@ -31,11 +34,17 @@ def get_goes_cartopy_crs(goes_ds: xr.Dataset) -> ccrs.Geostationary:
 
 def add_goes_xy_meters(goes_ds: xr.Dataset) -> xr.Dataset:
     """
-    Add Cartopy-compatible GOES fixed-grid coordinates in meters.
+    Add Cartopy-compatible projected x/y coordinates in meters.
 
-    Native GOES ABI x/y coordinates are scan angles in radians.
-    Cartopy's Geostationary projection expects projected coordinates in meters.
+    GOES ABI x/y coordinates are scan angles in radians. Cartopy's
+    Geostationary projection expects projected coordinates in meters.
     """
+    if "goes_imager_projection" not in goes_ds:
+        raise ValueError("Dataset is missing `goes_imager_projection`.")
+
+    if "x" not in goes_ds.coords or "y" not in goes_ds.coords:
+        raise ValueError("Dataset must contain native GOES `x` and `y` coordinates.")
+
     h = float(goes_ds["goes_imager_projection"].attrs["perspective_point_height"])
 
     return goes_ds.assign_coords(

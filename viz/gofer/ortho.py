@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from pathlib import Path
-from gofer.goes_utils import get_projection_params
-from gofer.orthorectify import lonlat_to_abi_scan_angles
+from gofer.goes_utils import *
+from viz.gofer.goes_plotting_utils import *
+from gofer.geometry import lonlat_to_abi_scan_angles
 
 def make_uncorrected_on_ortho_grid(
     goes_filepath: str,
@@ -218,3 +219,342 @@ def make_original_vs_terrain_corrected_gif(
     )
 
     return output_gif
+
+#### NOTE This portion compares Datasets; the first dataset is in the native GOES projection, and the second is in lat/lon.
+# The methods above just read a file and a Dataset; will eventually be merged in a clean-up pass.
+
+def _default_extent_from_latlon_ds(ds: xr.Dataset) -> list[float]:
+    """
+    Return Cartopy extent from an orthorectified lat/lon Dataset.
+
+    Cartopy extent order:
+        [min_lon, max_lon, min_lat, max_lat]
+    """
+    if "longitude" not in ds.coords or "latitude" not in ds.coords:
+        raise ValueError(
+            "terrain_corrected_ds must contain `longitude` and `latitude` "
+            "coordinates if extent is not provided."
+        )
+
+    return [
+        float(ds["longitude"].min()),
+        float(ds["longitude"].max()),
+        float(ds["latitude"].min()),
+        float(ds["latitude"].max()),
+    ]
+
+
+def _shared_color_limits(
+    original_da: xr.DataArray,
+    terrain_da: xr.DataArray,
+    *,
+    percentiles: tuple[float, float] = (2, 98),
+    force_range: tuple[float, float] | None = None,
+) -> tuple[float, float]:
+    """
+    Compute shared color limits for both frames.
+    """
+    if force_range is not None:
+        return float(force_range[0]), float(force_range[1])
+
+    values = []
+
+    for da in [original_da, terrain_da]:
+        arr = da.values
+        arr = arr[np.isfinite(arr)]
+        if arr.size:
+            values.append(arr.ravel())
+
+    if not values:
+        raise ValueError("No finite values found for color scaling.")
+
+    all_values = np.concatenate(values)
+    vmin, vmax = np.nanpercentile(all_values, percentiles)
+
+    return float(vmin), float(vmax)
+
+
+def _decorate_map(
+    ax,
+    *,
+    extent: list[float],
+    label: str,
+    title: str | None,
+    show_features: bool = True,
+    show_gridlines: bool = True,
+):
+    """
+    Add common map decorations and frame label.
+    """
+    ax.set_extent(extent, crs=ccrs.PlateCarree())
+
+    if show_features:
+        ax.coastlines(resolution="10m", linewidth=0.8)
+        ax.add_feature(cfeature.STATES, linewidth=0.4)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.4)
+
+    if show_gridlines:
+        gl = ax.gridlines(
+            draw_labels=True,
+            linewidth=0.3,
+            alpha=0.5,
+            linestyle="--",
+        )
+        gl.top_labels = False
+        gl.right_labels = False
+
+    if title is not None:
+        ax.set_title(title)
+
+    ax.text(
+        0.03,
+        0.95,
+        label,
+        transform=ax.transAxes,
+        fontsize=18,
+        fontweight="bold",
+        va="top",
+        ha="left",
+        bbox={
+            "facecolor": "white",
+            "alpha": 0.75,
+            "edgecolor": "none",
+            "boxstyle": "round,pad=0.3",
+        },
+    )
+
+
+def _save_native_abi_frame(
+    original_ds: xr.Dataset,
+    *,
+    variable: str,
+    output_png: str | Path,
+    extent: list[float],
+    label: str,
+    title: str | None,
+    cmap: str,
+    vmin: float,
+    vmax: float,
+    show_features: bool,
+    show_gridlines: bool,
+):
+    """
+    Save a frame from a native GOES ABI fixed-grid Dataset.
+    """
+    ds_plot = add_goes_xy_meters(original_ds)
+    goes_crs = get_goes_cartopy_crs(ds_plot)
+
+    fig = plt.figure(figsize=(8, 7), dpi=140)
+    ax = plt.axes(projection=ccrs.PlateCarree())
+
+    ds_plot[variable].plot.pcolormesh(
+        ax=ax,
+        x="x_m",
+        y="y_m",
+        transform=goes_crs,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        add_colorbar=False,
+        infer_intervals=False,
+    )
+
+    _decorate_map(
+        ax,
+        extent=extent,
+        label=label,
+        title=title,
+        show_features=show_features,
+        show_gridlines=show_gridlines,
+    )
+
+    fig.savefig(output_png, dpi=140)
+    plt.close(fig)
+
+
+def _save_terrain_corrected_frame(
+    terrain_corrected_ds: xr.Dataset,
+    *,
+    variable: str,
+    output_png: str | Path,
+    extent: list[float],
+    label: str,
+    title: str | None,
+    cmap: str,
+    vmin: float,
+    vmax: float,
+    show_features: bool,
+    show_gridlines: bool,
+):
+    """
+    Save a frame from an orthorectified latitude/longitude Dataset.
+    """
+    if "longitude" not in terrain_corrected_ds.coords:
+        raise ValueError("terrain_corrected_ds is missing `longitude` coordinate.")
+
+    if "latitude" not in terrain_corrected_ds.coords:
+        raise ValueError("terrain_corrected_ds is missing `latitude` coordinate.")
+
+    fig = plt.figure(figsize=(8, 7), dpi=140)
+    ax = plt.axes(projection=ccrs.PlateCarree())
+
+    terrain_corrected_ds[variable].plot.pcolormesh(
+        ax=ax,
+        x="longitude",
+        y="latitude",
+        transform=ccrs.PlateCarree(),
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        add_colorbar=False,
+        infer_intervals=False,
+    )
+
+    _decorate_map(
+        ax,
+        extent=extent,
+        label=label,
+        title=title,
+        show_features=show_features,
+        show_gridlines=show_gridlines,
+    )
+
+    fig.savefig(output_png, dpi=140)
+    plt.close(fig)
+
+
+def make_original_vs_terrain_corrected_gif2(
+    original_ds: xr.Dataset,
+    terrain_corrected_ds: xr.Dataset,
+    *,
+    variable: str = "MaskConfidence",
+    output_gif: str | Path = "original_vs_terrain_corrected.gif",
+    extent: list[float] | None = None,
+    original_label: str = "Original",
+    terrain_corrected_label: str = "Terrain Corrected",
+    original_title: str = "Original GOES ABI fixed grid",
+    terrain_corrected_title: str = "Terrain-corrected GOES",
+    cmap: str = "gray",
+    duration_ms: int = 900,
+    percentiles: tuple[float, float] = (2, 98),
+    force_range: tuple[float, float] | None = None,
+    show_features: bool = True,
+    show_gridlines: bool = True,
+    keep_frames: bool = False,
+) -> str:
+    """
+    Create a GIF cycling between a native ABI Dataset and an orthorectified Dataset.
+
+    Parameters
+    ----------
+    original_ds:
+        Dataset on the native GOES ABI fixed grid. It must contain:
+            - variable
+            - x/y scan-angle coordinates
+            - goes_imager_projection
+
+    terrain_corrected_ds:
+        Orthorectified Dataset on a latitude/longitude grid. It must contain:
+            - variable
+            - longitude/latitude coordinates
+
+    variable:
+        Variable name to plot from both datasets.
+
+    output_gif:
+        Output GIF path.
+
+    extent:
+        Optional Cartopy extent in lon/lat order:
+
+            [min_lon, max_lon, min_lat, max_lat]
+
+        If omitted, the extent is inferred from terrain_corrected_ds.
+
+    force_range:
+        Optional fixed color range.
+
+        For MaskConfidence, use:
+
+            force_range=(0.0, 1.0)
+
+    Returns
+    -------
+    str
+        Path to saved GIF.
+    """
+    if variable not in original_ds:
+        raise ValueError(f"original_ds does not contain variable `{variable}`.")
+
+    if variable not in terrain_corrected_ds:
+        raise ValueError(
+            f"terrain_corrected_ds does not contain variable `{variable}`."
+        )
+
+    if extent is None:
+        extent = _default_extent_from_latlon_ds(terrain_corrected_ds)
+
+    output_gif = Path(output_gif)
+    output_gif.parent.mkdir(parents=True, exist_ok=True)
+
+    vmin, vmax = _shared_color_limits(
+        original_ds[variable],
+        terrain_corrected_ds[variable],
+        percentiles=percentiles,
+        force_range=force_range,
+    )
+
+    original_png = output_gif.with_name(f"{output_gif.stem}_original_frame.png")
+    terrain_png = output_gif.with_name(
+        f"{output_gif.stem}_terrain_corrected_frame.png"
+    )
+
+    _save_native_abi_frame(
+        original_ds,
+        variable=variable,
+        output_png=original_png,
+        extent=extent,
+        label=original_label,
+        title=original_title,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        show_features=show_features,
+        show_gridlines=show_gridlines,
+    )
+
+    _save_terrain_corrected_frame(
+        terrain_corrected_ds,
+        variable=variable,
+        output_png=terrain_png,
+        extent=extent,
+        label=terrain_corrected_label,
+        title=terrain_corrected_title,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        show_features=show_features,
+        show_gridlines=show_gridlines,
+    )
+
+    frames = [
+        Image.open(original_png).convert("RGB"),
+        Image.open(terrain_png).convert("RGB"),
+    ]
+
+    frames[0].save(
+        output_gif,
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration_ms,
+        loop=0,
+    )
+
+    for frame in frames:
+        frame.close()
+
+    if not keep_frames:
+        original_png.unlink(missing_ok=True)
+        terrain_png.unlink(missing_ok=True)
+
+    return str(output_gif)

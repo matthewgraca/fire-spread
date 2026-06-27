@@ -57,3 +57,44 @@ def vars_with_xy_dims(goes_ds: xr.Dataset) -> list[str]:
         if {"x", "y"}.issubset(dims):
             out.append(name)
     return out
+
+
+def validate_xy_coords(goes_ds: xr.Dataset) -> None:
+    """
+    Validate that a GOES Dataset has ABI fixed-grid coordinates.
+
+    If the dataset doesn't have coordinates, then we can't do anything!
+    """
+    if "x" not in goes_ds.coords or "y" not in goes_ds.coords:
+        raise ValueError("GOES dataset must have `x` and `y` fixed-grid coordinates.")
+
+
+def resolve_data_vars(goes_ds: xr.Dataset, data_vars: Optional[Sequence[str]] = None) -> list[str]:
+    """
+    Resolve the GOES data variables to orthorectify.
+
+    If ``data_vars`` is provided, those variables are selected. Otherwise, all
+    variables with both ``y`` and ``x`` dimensions are selected.
+    """
+    data_vars = data_vars if data_vars else vars_with_xy_dims(goes_ds)
+
+    if not data_vars:
+        raise ValueError("No GOES data variables with both `y` and `x` dimensions found.")
+
+    missing = [name for name in data_vars if name not in goes_ds.data_vars]
+    if missing:
+        raise ValueError(f"GOES data variable(s) not found: {', '.join(missing)}")
+
+    non_spatial = [
+        name
+        for name in data_vars
+        if not {"x", "y"}.issubset(goes_ds[name].dims)
+    ]
+    if non_spatial:
+        raise ValueError(
+            "GOES data variable(s) must have both `y` and `x` dimensions: "
+            + ", ".join(non_spatial)
+        )
+
+    return data_vars
+

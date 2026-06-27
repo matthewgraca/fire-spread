@@ -1,4 +1,4 @@
-from gofer.remapper import fdc_mask_confidence_dataset
+from gofer.remapper import map_fdc_mask_to_confidence 
 from viz.gofer.goes_plotting_utils import (
     get_goes_cartopy_crs, add_goes_xy_meters
 )
@@ -112,7 +112,7 @@ goes_filepath = '/home/mgraca/Workspace/fire-spread/data/goes/noaa-goes17/ABI-L2
 before = xr.open_dataset(goes_filepath, decode_times=False)
 print(before)
 
-ds = fdc_mask_confidence_dataset(goes_filepath)
+ds = map_fdc_mask_to_confidence(before)
 print(ds)
 print()
 print(ds['MaskConfidence'].values.max())

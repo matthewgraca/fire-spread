@@ -1,5 +1,6 @@
 from viz.gofer.ortho import make_original_vs_terrain_corrected_gif
-from gofer.orthorectify import orthorectify
+from gofer.ortho import orthorectify
+import xarray as xr
 from argparse import ArgumentParser
 
 argparser = ArgumentParser(description='Demonstration of the orthorectification on the Sierra Nevada.')
@@ -11,11 +12,12 @@ args = argparser.parse_args()
 goes_file = args.netcdf
 dem_file = args.tiff
 out = args.out
+bbox = (-120.25, 37.25, -118.75, 38.50)
 
 ortho_ds = orthorectify(
-    goes_filepath=goes_file,
+    xr.open_dataset(goes_file, decode_times=False),
     dem_filepath=dem_file,
-    bbox=(-120.25, 37.25, -118.75, 38.50),
+    bbox=bbox
 )
 
 gif_path = make_original_vs_terrain_corrected_gif(
