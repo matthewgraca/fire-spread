@@ -59,6 +59,7 @@ def _make_ortho_map(
     dem_filepath: str,
     bbox: BBox,
     *,
+    parallax_adjustment_factor=0.85,
     include_fixed_grid_diagnostics: bool = True,
 ) -> xr.Dataset:
     """
@@ -69,6 +70,7 @@ def _make_ortho_map(
     geometry can be reused for every frame in a multi-time GOES Dataset as long
     as the fixed grid and projection are unchanged.
 
+    NOTE **(this will probably be moved to the readme)**
     Fixed grid diagnostics refer to which original ABI pixels the DEM-grid 
     sampled from. Recall that DEM is sub-pixel (30m) from the perspective 
     of GOES (2km); so we have to make a choice on what pixel on the DEM-grid 
@@ -79,6 +81,18 @@ def _make_ortho_map(
 
     This tells you things like how many of the same GOES pixel was used for 
     a given bundle of pixels on the DEM-grid.
+
+    Regarding parallax adjustment factor; GOFER authors experimentally 
+    identified that an adjustment factor is useful for the fire mask product, 
+    instead of using the full correction.
+
+    Full orthorectification is correct for a known surface point. GOFER’s 
+    active-fire pixels are not known surface points; they are coarse, mixed, 
+    processed fire-confidence signals used to build perimeters. The adjustment 
+    factor lets the algorithm apply the physically expected correction while 
+    damping overcorrection caused by sub-pixel fire location uncertainty, 
+    DEM/pixel scale mismatch, smoothing, thresholding, and sensor/view-angle 
+    biases.
     """
     validate_xy_coords(goes_ds)
     params = get_projection_params(goes_ds)
@@ -87,7 +101,20 @@ def _make_ortho_map(
     lon_2d, lat_2d = np.meshgrid(dem_da["x"].values, dem_da["y"].values)
     elevation = dem_da.values
 
-    abi_x, abi_y = lonlat_to_abi_scan_angles(
+    # regrid with no parallax adjustment
+    abi_x_0, abi_y_0 = lonlat_to_abi_scan_angles(
+        lon_2d,
+        lat_2d,
+        np.zeros_like(elevation),
+        satellite_height=params["satellite_height"],
+        semi_major_axis=params["semi_major_axis"],
+        semi_minor_axis=params["semi_minor_axis"],
+        eccentricity=params["eccentricity"],
+        longitude_of_projection_origin=params["longitude_of_projection_origin"],
+    )
+
+    # regrid with full parallax adjustment
+    abi_x_full, abi_y_full = lonlat_to_abi_scan_angles(
         lon_2d,
         lat_2d,
         elevation,
@@ -97,6 +124,9 @@ def _make_ortho_map(
         eccentricity=params["eccentricity"],
         longitude_of_projection_origin=params["longitude_of_projection_origin"],
     )
+
+    abi_x = abi_x_0 + parallax_adjustment_factor * (abi_x_full - abi_x_0)
+    abi_y = abi_y_0 + parallax_adjustment_factor * (abi_y_full - abi_y_0)
 
     attrs = {
         "orthorectification": "GOES ABI sampled onto EPSG:4326 DEM grid",
@@ -219,6 +249,7 @@ def orthorectify(
     dem_filepath: str,
     bbox: BBox,
     data_vars: Sequence[str] | None = None,
+    parallax_adjustment_factor=0.85,
     include_fixed_grid_diagnostics: bool = True,
 ) -> xr.Dataset:
     """
@@ -232,6 +263,7 @@ def orthorectify(
         goes_ds=goes_ds,
         dem_filepath=dem_filepath,
         bbox=bbox,
+        parallax_adjustment_factor=0.85,
         include_fixed_grid_diagnostics=include_fixed_grid_diagnostics,
     )
 
