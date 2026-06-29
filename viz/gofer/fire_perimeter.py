@@ -68,6 +68,7 @@ print(ds)
 gdf = gpd.read_file("data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson")
 bobcat_fire = gdf.loc[gdf['FIRE_NAME'] == 'BOBCAT']
 
+''' full
 for i, d in tqdm(enumerate(ds['time'].values)):
     tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
     fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
@@ -105,3 +106,43 @@ for i, d in tqdm(enumerate(ds['time'].values)):
 
     plt.savefig(f"out/gofer/{dt_end.strftime('%Y-%m-%dT%H:%M:%S')}.png")
     plt.close()
+'''
+''' just final '''
+i, d = len(ds['time'].values) - 1, ds['time'].values[-1]
+tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
+fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
+
+mask_conf = ds["MaskConfidence"].isel(time=i)
+# plot high-confidence only
+plot = mask_conf.where(mask_conf >= 0.80).plot(ax=axes, **plot_shared_kwargs)
+
+axes.add_image(tiler, 12)
+axes.set_extent(extent, crs=ccrs.PlateCarree())
+bobcat_fire.to_crs(epsg=4326).plot(
+    ax=axes,
+    transform=ccrs.PlateCarree(),
+    facecolor='none',
+    edgecolor='black'
+)
+
+cbar = fig.colorbar(
+    plot,
+    ax=axes,
+    orientation='vertical',
+    shrink=0.7,
+    pad=0.03
+)
+
+cbar.set_label("Fire Confidence")
+
+dt_start = pd.to_datetime(mask_conf['time_start'].item())
+dt_end = pd.to_datetime(mask_conf['time_end'].item())
+
+axes.set_title(
+    f"GOFER \n"
+    f"start: {dt_start}\n"
+    f"end: {dt_end}"
+)
+
+plt.savefig(f"out/gofer/{dt_end.strftime('%Y-%m-%dT%H:%M:%S')}.png")
+plt.close()

@@ -87,6 +87,7 @@ def save_nc(ds, save_path):
         }
     )
     '''
+    # for anything with a float, have the fill value be np.nan
     ds.to_netcdf(
         str(save_path),
         mode="w",
@@ -123,6 +124,7 @@ def main():
             'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
         )
 
+    '''
     west_goes_ds = open_and_combine_ds(west_goes_filepaths)
     west_remapped_ds = remap(west_goes_ds)
     west_ortho_ds = ortho(west_remapped_ds, dem_filepath, bbox)
@@ -131,12 +133,11 @@ def main():
     east_goes_ds = open_and_combine_ds(east_goes_filepaths)
     east_remapped_ds = remap(east_goes_ds)
     east_ortho_ds = ortho(east_remapped_ds, dem_filepath, bbox)
-    save_nc(west_ortho_ds, 'temp/east_bobcat_2020.nc')
+    save_nc(east_ortho_ds, 'temp/east_bobcat_2020.nc')
 
     '''
     west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
     east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
-    '''
 
     composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
     save_nc(composite_ds, save_path='out/bobcat_2020.nc')
