@@ -1,6 +1,9 @@
 # user-defined
 #   out/ should be output for scripts, usually visualizations
+#   nc files for tests are massive; it makes the code untestable if you don't 
+#       have them, so I'm not sure the best way to include them.
 out/ 
+*.nc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
