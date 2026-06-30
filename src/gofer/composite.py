@@ -3,6 +3,40 @@ from __future__ import annotations
 import xarray as xr
 import numpy as np
 
+def _dynamic_chunk(
+    ds: xr.Dataset,
+    data_var: str = "MaskConfidence",
+    target_chunk_mb: float = 128,
+) -> xr.Dataset:
+    """
+    Dynamically chunks the Dataset to a given target chunk size.
+
+    Originally, we chunked data according to time = 1, lat = n, lon = m.
+
+    However, this produced chunks that were smaller than the recommended range 
+    (10MB, 1GB). Since Dask scheduling has overhead of 1ms, it's worth having 
+    larger chunks if we're going to do it at all.
+
+    So, we now chunk time dynamically.
+    """
+    bytes_per_value = ds[data_var].dtype.itemsize
+
+    lat_chunk_size = ds.sizes["latitude"]
+    lon_chunk_size = ds.sizes["longitude"]
+
+    bytes_per_time_slice = lat_chunk_size * lon_chunk_size * bytes_per_value
+    target_bytes = target_chunk_mb * 1024**2
+
+    available_time_chunks = max(1, int(target_bytes // bytes_per_time_slice))
+    time_chunk_size = min(available_time_chunks, ds.sizes["time"])
+
+    return ds.chunk({
+        "time": time_chunk_size,
+        "latitude": lat_chunk_size,
+        "longitude": lon_chunk_size,
+    })
+
+
 def composite(
     west_ds: xr.Dataset,
     east_ds: xr.Dataset,
@@ -31,6 +65,7 @@ def composite(
 
     Returns:
         xr.Dataset: A dataset merged according to the minimum data variable.
+        Also spatially chunks the data for memory efficiency.
     """
     # normalize time
     west_ds = west_ds.assign_coords(time=west_ds.time.dt.round("1h"))
@@ -77,6 +112,5 @@ def composite(
 
     # merge on minimum value
     combined_ds = combined_ds.min(dim="satellite", skipna=True)
-    #combined_ds = combined_ds.max(dim="satellite", skipna=True)
 
-    return combined_ds
+    return _dynamic_chunk(combined_ds, data_var, target_chunk_mb=256)
