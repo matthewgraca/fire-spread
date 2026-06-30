@@ -41,6 +41,25 @@ Super interesting stuff, but I'm definitely not qualified to speak more on the m
 
 ![](https://raw.githubusercontent.com/spestana/goes-ortho/main/docs/images/GOES-terrain-correction.gif)
 
+## Creating the orthographic map
+With regards to the creation of the orthographic map, we do two things of note:
+1. Create fixed grid diagnostics
+2. Perform parallax adjustment with a given factor
+
+### Fixed grid diagnostics
+Fixed grid diagnostics refer to which original ABI pixels the DEM-grid sampled from. Recall that DEM is sub-pixel (30m) from the perspective of GOES (2km); so we have to make a choice on what pixel on the DEM-grid will take from GOES, where we use nearest-neighbor.
+
+`abi_fixed_grid_x`, `abi_fixed_grid_y`, and `zone_labels` records the GOES grid cells selected.
+
+This tells you things like how many of the same GOES pixel was used for a given bundle of pixels on the DEM-grid.
+
+### Parallax Adjustment Factor
+Regarding parallax adjustment factor; GOFER authors experimentally identified that an adjustment factor is useful for the fire mask product, instead of using the full correction.
+
+Why not use orthorectification as-is (like in Spetsana)? Because full orthorectification is correct for a known surface point; but GOFER’s active-fire pixels are not known surface points; they are coarse, mixed, processed fire-confidence signals used to build perimeters. The adjustment factor lets the algorithm apply the physically expected correction while damping overcorrection caused by sub-pixel fire location uncertainty, DEM/pixel scale mismatch, smoothing, thresholding, and sensor/view-angle biases.
+
+At the end of the day, the authors observe higher IOU with fire perimeters when the parallax adjusment is slightly dampened with the GOFER-Combined product.
+
 ## Sources and Further Reading
 Orthorectification logic adapted from Spetsana. Includes a good explanation as well!
 - Repo: https://github.com/spestana/goes-ortho

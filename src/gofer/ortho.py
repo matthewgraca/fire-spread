@@ -70,29 +70,13 @@ def _make_ortho_map(
     geometry can be reused for every frame in a multi-time GOES Dataset as long
     as the fixed grid and projection are unchanged.
 
-    NOTE **(this will probably be moved to the readme)**
-    Fixed grid diagnostics refer to which original ABI pixels the DEM-grid 
-    sampled from. Recall that DEM is sub-pixel (30m) from the perspective 
-    of GOES (2km); so we have to make a choice on what pixel on the DEM-grid 
-    will take from GOES, where we use nearest-neighbor.
-    
-    abi_fixed_grid_x, abi_fixed_grid_y, and zone_labels records the GOES grid 
-    cells selected.
+    Fixed grid diagnostics allows you to see what original ABI pixel the DEM 
+    grid sampled from. For information regarding fixed grid diagnostics, see 
+    the README.
 
-    This tells you things like how many of the same GOES pixel was used for 
-    a given bundle of pixels on the DEM-grid.
-
-    Regarding parallax adjustment factor; GOFER authors experimentally 
-    identified that an adjustment factor is useful for the fire mask product, 
-    instead of using the full correction.
-
-    Full orthorectification is correct for a known surface point. GOFER’s 
-    active-fire pixels are not known surface points; they are coarse, mixed, 
-    processed fire-confidence signals used to build perimeters. The adjustment 
-    factor lets the algorithm apply the physically expected correction while 
-    damping overcorrection caused by sub-pixel fire location uncertainty, 
-    DEM/pixel scale mismatch, smoothing, thresholding, and sensor/view-angle 
-    biases.
+    Parallax adjustment factor determines how much parallax correction should 
+    be applied to the given grid. For more information regarding this, see 
+    the README.
     """
     validate_xy_coords(goes_ds)
     params = get_projection_params(goes_ds)
