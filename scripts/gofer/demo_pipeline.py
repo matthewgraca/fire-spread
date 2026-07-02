@@ -5,6 +5,7 @@ from viz.gofer.ortho import (
     make_original_vs_terrain_corrected_gif,
     make_original_vs_terrain_corrected_gif2
 )
+from gofer.spatial_smoothing import smooth
 import pickle
 from pathlib import Path
 import time
@@ -70,23 +71,18 @@ def comp(west_ortho_ds, east_ortho_ds, dates):
     print(composite_ds)
     return composite_ds
 
+def smoothing(ds):
+    print(f"Convolving over original raster...", end=" ")
+    start_time = time.perf_counter()
+
+    smoothed_ds = smooth(ds, kernel_width_m=1700)
+
+    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
+    return smoothed_ds
+
+
 def save_nc(ds, save_path):
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    '''
-    ds.to_netcdf(
-        str(save_path),
-        mode="w",
-        engine="netcdf4",
-        encoding={
-            "MaskConfidence": {
-                "zlib": True,
-                "complevel": 4,
-                "dtype": "float32",
-                "_FillValue": np.float32(np.nan),
-            }
-        }
-    )
-    '''
     # for anything with a float, have the fill value be np.nan
     ds.to_netcdf(
         str(save_path),
@@ -124,6 +120,7 @@ def main():
             'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
         )
 
+    # open, remap, ortho each satellite
     '''
     west_goes_ds = open_and_combine_ds(west_goes_filepaths)
     west_remapped_ds = remap(west_goes_ds)
@@ -134,13 +131,19 @@ def main():
     east_remapped_ds = remap(east_goes_ds)
     east_ortho_ds = ortho(east_remapped_ds, dem_filepath, bbox)
     save_nc(east_ortho_ds, 'temp/east_bobcat_2020.nc')
-
     '''
     west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
     east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
 
+    # composite the two into one
     composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
-    save_nc(composite_ds, save_path='out/bobcat_2020.nc')
+    save_nc(composite_ds, save_path='temp/bobcat_2020_composited.nc')
+
+    composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
+
+    # apply smooth edges 
+    smoothed_ds = smoothing(composite_ds)
+    save_nc(smoothed_ds, save_path='out/bobcat_2020_smoothed.nc')
 
     # viz -- sierra nevada orthorectification
     '''

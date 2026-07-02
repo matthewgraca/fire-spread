@@ -28,7 +28,7 @@ with open('temp/filelist.pkl', 'rb') as f:
         goes_files['lat_max'] + buffer
     ]
 
-combined_ds = xr.open_dataset('out/bobcat_2020.nc')
+combined_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc')
 
 plot_shared_kwargs = {
     'transform' : ccrs.PlateCarree(),
