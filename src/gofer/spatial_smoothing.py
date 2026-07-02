@@ -67,11 +67,6 @@ def smooth(
 
     The effect of this smoothing is mostly on the edges, keeping the body 
     of the structure intact.
-
-    # perhaps send to README?
-    The authors determined that these kernel sizes worked best for their large
-    California fires: 
-    (GOES-East: 3.1–3.6 km; GOES-West: 2.5–2.7 km; GOES-Combined: 1.6–1.7 km)
     """
     kernel_size = _kernel_size_from_meters(ds, kernel_width_m)
 

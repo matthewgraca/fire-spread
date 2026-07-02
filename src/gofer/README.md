@@ -67,3 +67,14 @@ Orthorectification logic adapted from Spetsana. Includes a good explanation as w
 Coordinate transformation (or geolocation) between GOES ABI scan angles and lat/lon
 - Practical: https://lsterzinger.medium.com/add-lat-lon-coordinates-to-goes-16-goes-17-l2-data-and-plot-with-cartopy-27f07879157f
 - Theory and Math: https://makersportal.com/blog/2018/11/25/goes-r-satellite-latitude-and-longitude-grid-projection-algorithm
+
+# Compositing
+This one is quite simple; it's basically combining two different satellite images onto one coherent map. Now, this would normally be a pain because you'd have to move each satellite to lat/lon, then painfully align both lat/lon grids to have the same elements... but thankfully, our orthorectification geolocates each satellite onto the EXACT same grid defined by our elevation map! So it's a simple merge on whatever data variable; we use the average here.
+
+# Spatial smoothing
+The goal of this is to smooth out the jagged edges of the perimeters. We do this using a neighborhood mean convovling over the image. For example, a 3x3 kernel means that the center of the box takes on the mean of the other 8 pixels; done for every pixel. The paper recommends using a dynamic size kernel for this smoothing, as opposed to Google which uses a static 2km kernel.
+
+The authors determined that these kernel sizes worked best for their large California fires: 
+- GOES-East: 3.1–3.6 km
+- GOES-West: 2.5–2.7 km
+- GOES-Combined: 1.6–1.7 km
