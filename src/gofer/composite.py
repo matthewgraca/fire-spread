@@ -111,6 +111,6 @@ def composite(
     ).to_dataset()
 
     # merge on minimum value
-    combined_ds = combined_ds.min(dim="satellite", skipna=True)
+    combined_ds = combined_ds.mean(dim="satellite", skipna=True)
 
     return _dynamic_chunk(combined_ds, data_var, target_chunk_mb=256)
