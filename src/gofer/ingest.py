@@ -8,13 +8,8 @@ import contextlib
 import io
 import traceback
 
-# NOTE to make this into a proper class, we need to know the input. 
-# will it ingest all fires at once? do we pass in geodataframe of the exact fires we want?
-# I think that no matter what, the ingest() function will need to should take in:
-#   start and end date, name, year, acres, bbox
-
 #### multi-row operations; returns new dataframe
-def add_fire_centroids(gdf: gpd.GeoDataFrame):
+def _add_fire_centroids(gdf: gpd.GeoDataFrame):
     '''
     Finds the centroids of fires in the dataset, and adds them to the dataset.
     '''
@@ -36,7 +31,7 @@ def add_fire_centroids(gdf: gpd.GeoDataFrame):
 
     return temp_gdf
 
-def add_fire_bboxes(gdf: gpd.GeoDataFrame):
+def _add_fire_bboxes(gdf: gpd.GeoDataFrame):
     '''
     Finds a fire's bounding box, and adds them to the dataset
 
@@ -61,47 +56,44 @@ def add_fire_bboxes(gdf: gpd.GeoDataFrame):
 
     return temp_gdf
 
-####
 
-'''
-GeoJSON data found at:
-https://data.ca.gov/dataset/california-fire-perimeters-1950
-'''
-# NOTE param
-calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
-gdf = gpd.read_file(calfire_geojson_path)
+def read_calfire_geojson(filepath: str, min_year: int = 2020, min_acres: int = 20000) -> gpd.GeoDataFrame:
+    '''
+    Reads and grabs relevant data from the CalFire geojson.
 
-big_fires = gdf[
-    (gdf['YEAR_'] >= 2020) &
-    (gdf['GIS_ACRES'] > 20000)
-]
 
-temp_gdf = add_fire_bboxes(big_fires)
-temp_gdf = add_fire_centroids(temp_gdf)
-print(temp_gdf)
-print(temp_gdf.columns)
+    GeoJSON data found at:
+    https://data.ca.gov/dataset/california-fire-perimeters-1950
+    '''
+    gdf = gpd.read_file(filepath)
 
-'''
-['OBJECTID', 'YEAR_', 'STATE', 'AGENCY', 'UNIT_ID', 'FIRE_NAME',
-       'INC_NUM', 'IRWINID', 'ALARM_DATE', 'CONT_DATE', 'CAUSE', 'C_METHOD',
-       'OBJECTIVE', 'GIS_ACRES', 'COMMENTS', 'COMPLEX_NAME', 'COMPLEX_ID',
-       'FIRE_NUM', 'GlobalID', 'DECADES', 'geometry', 'bbox_min_lon',
-       'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
-       'centroid_lat']
-'''
-metadata_cols = ['FIRE_NAME', 'YEAR_', 'GIS_ACRES']
-trimmed_cols = [
-    'FIRE_NAME', 'ALARM_DATE',
-    'CONT_DATE', 'GIS_ACRES', 'COMPLEX_NAME', 'geometry', 'bbox_min_lon',
-    'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
-    'centroid_lat'
-]
+    big_fires = gdf[
+        (gdf['YEAR_'] >= min_year) &
+        (gdf['GIS_ACRES'] > min_acres)
+    ]
 
-# NOTE this is where you select the fire you want. we do it by name, but we can change the method by which we grab fires
-# like a whole dataframe, then iterate through them for the ingestion portion
-bobcat_fire = temp_gdf.loc[temp_gdf['FIRE_NAME'] == 'BOBCAT']
+    temp_gdf = _add_fire_bboxes(big_fires)
+    temp_gdf = _add_fire_centroids(temp_gdf)
 
-# INGESTION
+    '''
+    ['OBJECTID', 'YEAR_', 'STATE', 'AGENCY', 'UNIT_ID', 'FIRE_NAME',
+           'INC_NUM', 'IRWINID', 'ALARM_DATE', 'CONT_DATE', 'CAUSE', 'C_METHOD',
+           'OBJECTIVE', 'GIS_ACRES', 'COMMENTS', 'COMPLEX_NAME', 'COMPLEX_ID',
+           'FIRE_NUM', 'GlobalID', 'DECADES', 'geometry', 'bbox_min_lon',
+           'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
+           'centroid_lat']
+    '''
+    metadata_cols = ['FIRE_NAME', 'YEAR_', 'GIS_ACRES']
+    trimmed_cols = [
+        'FIRE_NAME', 'ALARM_DATE',
+        'CONT_DATE', 'GIS_ACRES', 'COMPLEX_NAME', 'geometry', 'bbox_min_lon',
+        'bbox_min_lat', 'bbox_max_lon', 'bbox_max_lat', 'centroid_lon',
+        'centroid_lat'
+    ]
+
+    return temp_gdf
+
+
 def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silent):
     '''
     Ingests the GOES-West and GOES-East data from NOAA's AWS bucket.
@@ -130,12 +122,10 @@ def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silen
         'domain' : domain,
         'save_dir' : save_dir,
         'return_as' : 'filelist',
-        'verbose' : verbose
+        'verbose' : verbose,
+        'ignore_missing' : True
     }
-    # NOTE replace nearest time with all. replace files with empty strings? Will need to change logic in...
-    #grep -R --include="*.py" "pickle" that looks for empty files (composite)? 
-    # NOTE redo composite tests and pipeline demo!!! could move those to test out remapper instead of binning it.
-    def _goes2go_ingest(subhourly, goes2go_kwargs):
+    def _goes2go_ingest(subhourly, date, goes2go_kwargs):
         if subhourly:
             g = goes_timerange(
                 start=date,
@@ -146,93 +136,79 @@ def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silen
             g = goes_nearesttime(attime=date, **goes2go_kwargs)
         return g
 
+    error_hit = False
     if silent:
         buffer = io.StringIO()
         try:
             with contextlib.redirect_stdout(buffer):
-                g = _goes2go_ingest(subhourly, goes2go_kwargs)
+                g = _goes2go_ingest(subhourly, date, goes2go_kwargs)
         # Missing on AWS's end
         except FileNotFoundError as e:
             tqdm.write(f'Data for {date} missing for GOES-{satellite}.')
+            error_hit = True
         except:
-            raise
+            tqdm.write(f'Data for {date} missing/corrupted for GOES-{satellite}.')
+            error_hit = True
     else:
-        g = _goes2go_ingest(subhourly, goes2go_kwargs)
+        g = _goes2go_ingest(subhourly, date, goes2go_kwargs)
 
-    return g
+    return None if error_hit else g
 
-def get_outages(east, west, dates):
-    if len(east) != len(west) != len(dates):
-        raise ValueError(
-            f'Number of files mismatch (East = {len(east)}, '
-            'West = {len(west)}, Dates = {len(dates)}'
-        )
-    outages = {
-        'EAST' : [],
-        'WEST' : []
+
+def download(
+    start, end,
+    goes_save_dir, metadata_save_dir, subhourly,
+    lon_min, lon_max, lat_min, lat_max,
+    fire_name, fire_year, fire_acres
+):
+    tqdm.write(f'Ingesting for {fire_name} {fire_year}')
+    dates = pd.date_range(start, end, freq='h', inclusive='left')
+    ingest_dates = dates.shift(-1) if subhourly else dates
+
+    goes_kwargs = {
+        'product' : 'ABI-L2-FDCC',
+        'domain' : 'C',
+        'save_dir' : goes_save_dir,
+        #'return_as' : 'filelist',
+        'verbose' : False,
+        'subhourly' : subhourly,
+        'silent' : True
     }
-    for e, w, d in zip(east, west, dates):
-        if not Path(e).is_file():
-            outages['EAST'].append(d)
-        if not Path(w).is_file():
-            outages['WEST'].append(d)
+    west_files = []
+    east_files = []
 
-    return outages
+    for d in (pbar := tqdm(ingest_dates.tz_localize(None))):
+        pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
 
-tqdm.write(f'Ingesting for {bobcat_fire["FIRE_NAME"].item()}')
-dates = pd.date_range(
-    bobcat_fire['ALARM_DATE'].item(),
-    bobcat_fire['CONT_DATE'].item(),
-    freq='h',
-    inclusive='left'
-)
-print(dates)
-# NOTE param
-goes_save_dir = '/home/mgraca/Workspace/fire-spread/data/goes'
-goes_kwargs = {
-    'product' : 'ABI-L2-FDCC',
-    'domain' : 'C',
-    'save_dir' : goes_save_dir,
-    #'return_as' : 'filelist',
-    'verbose': False
-}
-west_files = []
-east_files = []
+        east_file_df = ingest(d, satellite='EAST', **goes_kwargs)
+        if east_file_df is not None:
+            east_files.append(east_file_df)
 
-# NOTE TEST
-dates = dates[:30]
+        west_file_df = ingest(d, satellite='WEST', **goes_kwargs)
+        if west_file_df is not None:
+            west_files.append(west_file_df)
 
-# use one hour before for subhourly
-subhourly = True
-ingest_dates = dates.shift(-1) if subhourly else dates
-print(ingest_dates)
-for d in (pbar := tqdm(ingest_dates.tz_localize(None))):
-    pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
-    east_files.append(ingest(d, subhourly=subhourly, satellite='EAST', **goes_kwargs, silent=True))
-    west_files.append(ingest(d, subhourly=subhourly, satellite='WEST', **goes_kwargs, silent=True))
+    Path(metadata_save_dir).mkdir(parents=True, exist_ok=True)
+    tqdm.write(f'Saving file information, dates, fire metadata, and bounding box to {str(metadata_save_dir)}')
+    with open(metadata_save_dir / Path('metadata.pkl'), 'wb') as f:
+        pkg = {
+            'dates' : dates,
+            'fire_attrs' : {
+                'name' : fire_name,
+                'year' : fire_year,
+                'acres' : fire_acres
+            },
+            'lon_min' : lon_min,
+            'lon_max' : lon_max,
+            'lat_min' : lat_min,
+            'lat_max' : lat_max
+        }
+        pickle.dump(pkg, f)
 
-# NOTE param
-pkl_filepath = 'temp/metadata.pkl'
-Path(pkl_filepath).parent.mkdir(parents=True, exist_ok=True)
-tqdm.write(f'Saving dates, fire metadata, and bounding box to {pkl_filepath}')
-with open(pkl_filepath, 'wb') as f:
-    pkg = {
-        'dates' : dates,
-        'fire_attrs' : {
-            'name' : str(bobcat_fire['FIRE_NAME'].item()),
-            'year' : int(bobcat_fire['YEAR_'].item()),
-            'acres' : int(bobcat_fire['GIS_ACRES'].item())
-        },
-        'lon_min' : float(bobcat_fire['bbox_min_lon'].item()),
-        'lon_max' : float(bobcat_fire['bbox_max_lon'].item()),
-        'lat_min' : float(bobcat_fire['bbox_min_lat'].item()),
-        'lat_max' : float(bobcat_fire['bbox_max_lat'].item())
-    }
-    pickle.dump(pkg, f)
+    west_files_df = pd.concat(west_files, ignore_index=True)
+    east_files_df = pd.concat(east_files, ignore_index=True)
 
-west_files_df = pd.concat(west_files, ignore_index=True)
-print(west_files_df)
-east_files_df = pd.concat(east_files, ignore_index=True)
-print(east_files_df)
-west_files_df.to_csv('temp/west_files.csv', index=False) 
-east_files_df.to_csv('temp/east_files.csv', index=False) 
+    west_files_df.to_csv(metadata_save_dir / Path('west_files.csv'), index=False) 
+    east_files_df.to_csv(metadata_save_dir / Path('east_files.csv'), index=False) 
+
+    return None
