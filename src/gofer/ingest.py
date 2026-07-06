@@ -2,7 +2,7 @@ import pandas as pd
 import geopandas as gpd
 import pickle
 from pathlib import Path
-from goes2go.data import goes_nearesttime
+from goes2go.data import goes_nearesttime, goes_timerange
 from tqdm import tqdm
 import contextlib
 import io
@@ -10,6 +10,8 @@ import traceback
 
 # NOTE to make this into a proper class, we need to know the input. 
 # will it ingest all fires at once? do we pass in geodataframe of the exact fires we want?
+# I think that no matter what, the ingest() function will need to should take in:
+#   start and end date, name, year, acres, bbox
 
 #### multi-row operations; returns new dataframe
 def add_fire_centroids(gdf: gpd.GeoDataFrame):
@@ -100,13 +102,14 @@ trimmed_cols = [
 bobcat_fire = temp_gdf.loc[temp_gdf['FIRE_NAME'] == 'BOBCAT']
 
 # INGESTION
-def ingest(date, satellite, product, domain, save_dir, verbose, silent):
+def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silent):
     '''
     Ingests the GOES-West and GOES-East data from NOAA's AWS bucket.
 
     Args:
-        date (datetime64[ns]): The date, where the nearest observation will be 
-            taken.
+        date (datetime64[ns]): The date.
+        subhourly (bool): If true, all observations will be ingested. If 
+            false, only the nearest observation to the hour will be taken.
         satellite (str): The satellite to grab the data from.
         product (str): The specific GOES product to be grabbed.
         domain (str): The domain (mesoscale, conus, full disk).
@@ -116,10 +119,12 @@ def ingest(date, satellite, product, domain, save_dir, verbose, silent):
             annoyingly loud).
 
     Returns:
-        str: The path the file was downloaded.
+        pd.DataFrame: A dataframe of the file download. Expect:
+        file, product_mode, satellite, start, end, creation, product, 
+        mode_bands, mode, band
+
     '''
-    nearest_time_kwargs = {
-        'attime' : date,
+    goes2go_kwargs = {
         'satellite' : satellite,
         'product' : product,
         'domain' : domain,
@@ -127,23 +132,34 @@ def ingest(date, satellite, product, domain, save_dir, verbose, silent):
         'return_as' : 'filelist',
         'verbose' : verbose
     }
-    file = ''
+    # NOTE replace nearest time with all. replace files with empty strings? Will need to change logic in...
+    #grep -R --include="*.py" "pickle" that looks for empty files (composite)? 
+    # NOTE redo composite tests and pipeline demo!!! could move those to test out remapper instead of binning it.
+    def _goes2go_ingest(subhourly, goes2go_kwargs):
+        if subhourly:
+            g = goes_timerange(
+                start=date,
+                end=date + pd.Timedelta(hours=1),
+                **goes2go_kwargs
+            )
+        else:
+            g = goes_nearesttime(attime=date, **goes2go_kwargs)
+        return g
+
     if silent:
         buffer = io.StringIO()
         try:
             with contextlib.redirect_stdout(buffer):
-                g = goes_nearesttime(**nearest_time_kwargs)
-                file = g['file'].item()
+                g = _goes2go_ingest(subhourly, goes2go_kwargs)
         # Missing on AWS's end
         except FileNotFoundError as e:
             tqdm.write(f'Data for {date} missing for GOES-{satellite}.')
         except:
             raise
     else:
-        g = goes_nearesttime(**nearest_time_kwargs)
-        file = g['file'].item()
+        g = _goes2go_ingest(subhourly, goes2go_kwargs)
 
-    return str(Path(save_dir) / Path(file))
+    return g
 
 def get_outages(east, west, dates):
     if len(east) != len(west) != len(dates):
@@ -169,7 +185,8 @@ dates = pd.date_range(
     bobcat_fire['CONT_DATE'].item(),
     freq='h',
     inclusive='left'
-).tz_localize(None)
+)
+print(dates)
 # NOTE param
 goes_save_dir = '/home/mgraca/Workspace/fire-spread/data/goes'
 goes_kwargs = {
@@ -181,31 +198,27 @@ goes_kwargs = {
 }
 west_files = []
 east_files = []
-for d in (pbar := tqdm(dates)):
-    pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
-    east_files.append(ingest(d, 'EAST', **goes_kwargs, silent=True))
-    west_files.append(ingest(d, 'WEST', **goes_kwargs, silent=True))
 
-# need logic to handle missing frames (either one or both)
-outages = get_outages(east_files, west_files, dates)
-extent = (
-    bobcat_fire['bbox_min_lon'].item(),
-    bobcat_fire['bbox_max_lon'].item(),
-    bobcat_fire['bbox_min_lat'].item(),
-    bobcat_fire['bbox_max_lat'].item()
-)
+# NOTE TEST
+dates = dates[:30]
+
+# use one hour before for subhourly
+subhourly = True
+ingest_dates = dates.shift(-1) if subhourly else dates
+print(ingest_dates)
+for d in (pbar := tqdm(ingest_dates.tz_localize(None))):
+    pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
+    east_files.append(ingest(d, subhourly=subhourly, satellite='EAST', **goes_kwargs, silent=True))
+    west_files.append(ingest(d, subhourly=subhourly, satellite='WEST', **goes_kwargs, silent=True))
 
 # NOTE param
-pkl_filepath = 'temp/filelist.pkl'
+pkl_filepath = 'temp/metadata.pkl'
 Path(pkl_filepath).parent.mkdir(parents=True, exist_ok=True)
-tqdm.write(f'Saving west/east filepaths, dates, and outages to {pkl_filepath}')
+tqdm.write(f'Saving dates, fire metadata, and bounding box to {pkl_filepath}')
 with open(pkl_filepath, 'wb') as f:
     pkg = {
-        'west' : west_files,
-        'east' : east_files,
         'dates' : dates,
-        'outages' : outages,
-        'metadata' : {
+        'fire_attrs' : {
             'name' : str(bobcat_fire['FIRE_NAME'].item()),
             'year' : int(bobcat_fire['YEAR_'].item()),
             'acres' : int(bobcat_fire['GIS_ACRES'].item())
@@ -216,3 +229,10 @@ with open(pkl_filepath, 'wb') as f:
         'lat_max' : float(bobcat_fire['bbox_max_lat'].item())
     }
     pickle.dump(pkg, f)
+
+west_files_df = pd.concat(west_files, ignore_index=True)
+print(west_files_df)
+east_files_df = pd.concat(east_files, ignore_index=True)
+print(east_files_df)
+west_files_df.to_csv('temp/west_files.csv', index=False) 
+east_files_df.to_csv('temp/east_files.csv', index=False) 
