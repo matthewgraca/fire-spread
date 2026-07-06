@@ -6,6 +6,7 @@ from viz.gofer.ortho import (
     make_original_vs_terrain_corrected_gif2
 )
 from gofer.spatial_smoothing import smooth
+from gofer.temporal_downsampler import aggregate
 import pickle
 from pathlib import Path
 import time
@@ -13,29 +14,17 @@ import xarray as xr
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import sys
+from dask.diagnostics import ProgressBar
 
-def open_and_combine_ds(goes_filepaths):
-    print("Openining and combining datasets...", end=" ")
+def aggregation(goes_save_dir, csv_path, dates):
+    print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
     start_time = time.perf_counter()
-    ds = xr.open_mfdataset(
-        [p for p in goes_filepaths if Path(p).is_file()],
-        concat_dim="time",
-        combine="nested",
-        drop_variables=["Area", "Temp", "Power"],
-        decode_times=False,
-        parallel=True,
-        chunks={"time": 1, "y": 1500, "x": 2500}
-    )
-    
-    # decode_times=True sometimes plays out poorly, so we'll do it manually
-    # ds.t.attrs['units'] = seconds since 2000-01-01 12:00:00
-    origin = pd.Timestamp("2000-01-01 12:00:00")
-    decoded_times = origin + pd.to_timedelta(ds["t"].values, unit="s")
-    ds = ds.assign_coords(time=decoded_times)
-
+    ds = aggregate(goes_save_dir, csv_path, dates)
     print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(ds)
     return ds 
+
 
 def remap(goes_ds):
     print("Remapping mask to confidence values...", end=" ")
@@ -81,30 +70,39 @@ def smoothing(ds):
     return smoothed_ds
 
 
-def save_nc(ds, save_path):
+def save_nc(ds, save_path, chunk_size=None, data_var='MaskConfidence', show_progress=True):
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    # for anything with a float, have the fill value be np.nan
-    ds.to_netcdf(
-        str(save_path),
-        mode="w",
-        engine="netcdf4",
-        encoding={
-            name: {"_FillValue": np.nan}
-            for name, da in ds.variables.items()
-            if np.issubdtype(da.dtype, np.floating)
-        }
-    )
+    print(f'Saving to {save_path}...')
+
+    encoding = {}
+    for name, da in ds.variables.items():
+        enc = {}
+
+        # for anything with a float, have the fill value be np.nan
+        if np.issubdtype(da.dtype, np.floating):
+            enc["_FillValue"] = np.nan
+
+        # pass in a chunk size. Unfortunately, to_netcdf doesn't infer this
+        if chunk_size is not None:
+            if name == data_var:
+                enc["chunksizes"] = chunk_size
+                enc["zlib"] = False
+
+        if enc:
+            encoding[name] = enc
+
+    with ProgressBar():
+        ds.to_netcdf(
+            str(save_path),
+            mode="w",
+            engine="netcdf4",
+            encoding=encoding
+        )
+
 
 def main():
-    with open('temp/filelist.pkl', 'rb') as f:
+    with open('temp/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
-        ''' small sample to test with
-        west_goes_filepaths = data['west'][:24]
-        east_goes_filepaths = data['east'][:24]
-        dates = data['dates'][:24]
-        '''
-        west_goes_filepaths = data['west']
-        east_goes_filepaths = data['east']
         dates = data['dates']
 
         buffer = 0.1
@@ -121,25 +119,34 @@ def main():
         )
 
     # open, remap, ortho each satellite
-    '''
-    west_goes_ds = open_and_combine_ds(west_goes_filepaths)
-    west_remapped_ds = remap(west_goes_ds)
-    west_ortho_ds = ortho(west_remapped_ds, dem_filepath, bbox)
-    save_nc(west_ortho_ds, 'temp/west_bobcat_2020.nc')
+    west_goes_ds = aggregation(
+        goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+        csv_path='/home/mgraca/Workspace/fire-spread/temp/west_files.csv',
+        dates=dates
+    )
+    save_nc(west_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_aggregated.nc')
 
-    east_goes_ds = open_and_combine_ds(east_goes_filepaths)
-    east_remapped_ds = remap(east_goes_ds)
-    east_ortho_ds = ortho(east_remapped_ds, dem_filepath, bbox)
-    save_nc(east_ortho_ds, 'temp/east_bobcat_2020.nc')
-    '''
-    west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
-    east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
+    east_goes_ds = aggregation(
+        goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+        csv_path='/home/mgraca/Workspace/fire-spread/temp/east_files.csv',
+        dates=dates
+    )
+    save_nc(east_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_aggregated.nc')
+
+    #west_goes_ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
+    #east_goes_ds = xr.open_dataset('temp/east_bobcat_2020_aggregated.nc', chunks={"time": 1})
+
+    west_ortho_ds = ortho(west_goes_ds, dem_filepath, bbox)
+    east_ortho_ds = ortho(east_goes_ds, dem_filepath, bbox)
+
+    #west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
+    #east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
 
     # composite the two into one
     composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
     save_nc(composite_ds, save_path='temp/bobcat_2020_composited.nc')
 
-    composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
+    #composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
 
     # apply smooth edges 
     smoothed_ds = smoothing(composite_ds)

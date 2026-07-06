@@ -1,5 +1,6 @@
 import xarray as xr
 import pandas as pd
+import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from gofer.remapper import map_fdc_mask_to_confidence
@@ -35,16 +36,34 @@ def _open_and_combine_ds(
     return ds 
 
 
-def _prune_invalid_timesteps(ds: xr.Dataset, dates: pd.DatetimeIndex) -> xr.Dataset:
+def _prune_invalid_and_pad_missing_timesteps(
+    ds: xr.Dataset,
+    dates: pd.DatetimeIndex,
+    data_var: str = 'MaskConfidence'
+) -> xr.Dataset:
+    '''
+    Due to improper storage on GOES's end, there may be some invalid timesteps.
+    We prune those improper timesteps, and fill out the data of any timesteps 
+    that are missing with zeros.
+    '''
     # prune invalid timesteps due to improper storage on goes's end
     target_time = xr.DataArray(dates.tz_localize(None), dims="time", name="time")
     valid_dates = ds.time.isin(target_time)
-    return ds.sel(time=valid_dates)
+    ds = (ds
+        .sel(time=valid_dates)
+        .reindex(
+            time=target_time,
+            fill_value={data_var: np.float32(0)}
+        )
+    )
+
+    return ds
 
 def aggregate(
     goes_save_dir: str,
     csv_path: str,
-    dates: pd.DatetimeIndex
+    dates: pd.DatetimeIndex,
+    data_var: str = 'MaskConfidence'
 ) -> xr.Dataset:
     '''
     Temporally downsample a dataset according to a given list of dates.
@@ -62,10 +81,14 @@ def aggregate(
     A bit of an overloaded function in terms of seperation of duties, no?
 
     Args:
-        files_df (pd.DataFrame): A DataFrame of files, with a filename and 
-            a timestamp column.
+        goes_save_dir (str): The directory pointing to the location of the 
+            saved goes data. Will be appended with the files found in csv_path 
+            to generate a complete file path of the GOES netcdf file.
+        csv_path (str): The path of the csv file that contains an inventory 
+            of the files that were ingested.
         dates (pd.DatetimeIndex): A DatetimeIndex with which to align the 
             dates in the dataset with.
+        data_var (str): The data variable to extract and aggregate on.
 
     Returns:
         xr.Dataset: A dataset with the temporally downsampled dataset.
@@ -91,7 +114,7 @@ def aggregate(
         datasets.append(ds)
 
     ds = xr.concat(datasets, dim='time')
-    ds = _prune_invalid_timesteps(ds, dates)
+    ds = _prune_invalid_and_pad_missing_timesteps(ds, dates, data_var)
 
     return ds
 
