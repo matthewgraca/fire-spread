@@ -55,6 +55,24 @@ def _kernel_size_from_meters(ds: xr.Dataset, kernel_width_m: float) -> int:
 
     return kernel_size
 
+def _get_kernel_dims(da: xr.DataArray, kernel_size: int) -> tuple:
+    '''
+    Ensures the kernel dimensions only work on the spatial dimensions by
+    forcing all non-spatial dimensions to have a kernel size of 1.
+
+    For example, if the da has (time, latitude, longitude), then 
+    k = (1, kernel_size, kernel_size)
+
+    Or, if the da has (time, band latitude, longitude), then 
+    k = (1, 1, kernel_size, kernel_size)
+    '''
+    size_by_dim = {
+        dim: kernel_size if dim in {"latitude", "longitude"} else 1
+        for dim in da.dims
+    }
+
+    return tuple(size_by_dim[dim] for dim in da.dims)
+
 def smooth(
     ds: xr.Dataset,
     kernel_width_m: int = 1700,
@@ -73,7 +91,7 @@ def smooth(
     da = ds[input_variable]
     smoothed_values = uniform_filter(
         da.values,
-        size=(1, kernel_size, kernel_size),
+        size=_get_kernel_dims(da, kernel_size),
         mode="nearest"
     )
 
