@@ -49,6 +49,14 @@ Super interesting stuff, but I'm definitely not qualified to speak more on the m
 
 ![](https://raw.githubusercontent.com/spestana/goes-ortho/main/docs/images/GOES-terrain-correction.gif)
 
+## Usage
+`make_ortho_map()` creates the orthographic map. You only need to create one of these, so if your workflow requires frame-by-frame orthorectification, run this once.
+
+`apply_ortho_map()` applies the orthographic map to a given Dataset.
+
+`orthorectify()` accepts a whole dataset, which it will orthorectify
+    - This simply chains `make_ortho_map` and `apply_ortho_map`
+
 ## Creating the orthographic map
 With regards to the creation of the orthographic map, we do two things of note:
 1. Create fixed grid diagnostics

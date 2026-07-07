@@ -54,7 +54,7 @@ def _open_dem_epsg4326(
     return dem
 
 
-def _make_ortho_map(
+def make_ortho_map(
     goes_ds: xr.Dataset,
     dem_filepath: str,
     bbox: BBox,
@@ -175,7 +175,7 @@ def _zone_labels(fixed_x: np.ndarray, fixed_y: np.ndarray) -> np.ndarray:
     return inverse.reshape(fixed_x.shape)
 
 
-def _apply_ortho_map(
+def apply_ortho_map(
     goes_ds: xr.Dataset,
     ortho_map: xr.Dataset,
     *,
@@ -243,7 +243,7 @@ def orthorectify(
     applies that geometry to all requested variables and all time frames in the
     Dataset.
     """
-    ortho_map = _make_ortho_map(
+    ortho_map = make_ortho_map(
         goes_ds=goes_ds,
         dem_filepath=dem_filepath,
         bbox=bbox,
@@ -251,7 +251,7 @@ def orthorectify(
         include_fixed_grid_diagnostics=include_fixed_grid_diagnostics,
     )
 
-    ortho = _apply_ortho_map(
+    ortho = apply_ortho_map(
         goes_ds=goes_ds,
         ortho_map=ortho_map,
         data_vars=data_vars,
@@ -264,3 +264,4 @@ def orthorectify(
     )
 
     return ortho
+
