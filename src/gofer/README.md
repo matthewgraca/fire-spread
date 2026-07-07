@@ -10,7 +10,7 @@ As a part of the GOFER algorithm pulled from [**Google's Restif and Hoffman**](h
 
 # Ingest
 ## GOES AWS
-Ingestion pipeline uses [**goes2go**](https://goes2go.readthedocs.io/en/latest/) by Brian Blaylock. Not the fastest thing in the world, but it's proven to be robust and gets the job done as a downloader for GOES data. The core method here is `nearesttime()`, which grabs the file in the NOAA AWS bucket nearest to the time provided. We provide the top of the hour, and most (if not all) files nearest to the top of the hour seem to be about 4-5 minutes after. Since our resolution is hourly and fire spread isn't so aggressive that it spreads kilometers in five minutes, we aren't too concerned with +-5 minutes on the top of the hour.
+Ingestion pipeline uses [**goes2go**](https://goes2go.readthedocs.io/en/latest/) by Brian Blaylock. Not the fastest thing in the world, but it's proven to be robust and gets the job done as a downloader for GOES data.
 
 The product we pull from the GOES AWS bucket is the [**Fire Detection and Characterization product**](https://www.goes-r.gov/education/docs/fs_fire.pdf). This data comes in four flavors:
 - Mask
@@ -32,6 +32,14 @@ The pipeline also includes using CalFire/FRAP's [**California Fire Perimeters da
 
 ### Readings
 Play around with perimeter data on CalFire's Esri map: https://www.fire.ca.gov/what-we-do/fire-resource-assessment-program/fire-perimeters
+
+# Temporal Downsampler
+While the GOFER product is hourly, it makes use of the fact that GOES produces observations every 5 minutes (for 12 observations per hour). GOFER leverages this extra data by grabbing all the subhourly observations, remapping the pixels to confidence values, then grabbing the max confidence pixels.
+
+For example, for the hour 3:00, observations from (2:00, 3:00] are gathered. The observations are then compressed into one by max confidence. This significantly reduces the variance of our observations due to uncertainty (at least for the hour). After these observations are aggregated, they are assigned to the timestep 3:00.
+
+On top of this aggregation, this set of methods is also responsible for cleaning and alignment of timesteps. Any corrupt timesteps has their observations removed. This is usually due to erroneous storage on GOES's end. Then, any missing timesteps are automatically given observations with 0 confidence. 
+
 
 # Orthorectification
 ## Overview

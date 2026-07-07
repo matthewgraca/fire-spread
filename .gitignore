@@ -4,6 +4,7 @@
 #       have them, so I'm not sure the best way to include them.
 out/ 
 *.nc
+*.swp
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
