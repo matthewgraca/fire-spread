@@ -3,7 +3,7 @@ from __future__ import annotations
 import xarray as xr
 import numpy as np
 
-def _dynamic_chunk(
+def dynamic_chunk(
     ds: xr.Dataset,
     data_var: str = "MaskConfidence",
     target_chunk_mb: float = 128,
