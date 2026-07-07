@@ -118,39 +118,55 @@ def main():
             'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
         )
 
+    # parts of the pipeline to run
+    # if one is False, all downstream should be False
+    read = {
+        'aggregate' : True,
+        'ortho' : True,
+        'composite' : True,
+        'smooth' : False
+    }
     # open, remap, ortho each satellite
-    west_goes_ds = aggregation(
-        goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-        csv_path='/home/mgraca/Workspace/fire-spread/temp/west_files.csv',
-        dates=dates
-    )
-    save_nc(west_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_aggregated.nc')
+    if read['aggregate']:
+        west_goes_ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
+        east_goes_ds = xr.open_dataset('temp/east_bobcat_2020_aggregated.nc', chunks={"time": 1})
+    else:
+        west_goes_ds = aggregation(
+            goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+            csv_path='/home/mgraca/Workspace/fire-spread/temp/west_files.csv',
+            dates=dates
+        )
+        save_nc(west_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_aggregated.nc')
 
-    east_goes_ds = aggregation(
-        goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-        csv_path='/home/mgraca/Workspace/fire-spread/temp/east_files.csv',
-        dates=dates
-    )
-    save_nc(east_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_aggregated.nc')
+        east_goes_ds = aggregation(
+            goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+            csv_path='/home/mgraca/Workspace/fire-spread/temp/east_files.csv',
+            dates=dates
+        )
+        save_nc(east_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_aggregated.nc')
 
-    #west_goes_ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
-    #east_goes_ds = xr.open_dataset('temp/east_bobcat_2020_aggregated.nc', chunks={"time": 1})
+    if read['ortho']:
+        west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
+        east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
+    else:
+        west_ortho_ds = ortho(west_goes_ds, dem_filepath, bbox)
+        east_ortho_ds = ortho(east_goes_ds, dem_filepath, bbox)
 
-    west_ortho_ds = ortho(west_goes_ds, dem_filepath, bbox)
-    east_ortho_ds = ortho(east_goes_ds, dem_filepath, bbox)
-
-    #west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
-    #east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
 
     # composite the two into one
-    composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
-    save_nc(composite_ds, save_path='temp/bobcat_2020_composited.nc')
+    if read['composite']:
+        composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
+    else:
+        composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
+        save_nc(composite_ds, save_path='temp/bobcat_2020_composited.nc')
 
-    #composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
 
     # apply smooth edges 
-    smoothed_ds = smoothing(composite_ds)
-    save_nc(smoothed_ds, save_path='out/bobcat_2020_smoothed.nc')
+    if read['smooth']: 
+        smoothed_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc')
+    else:
+        smoothed_ds = smoothing(composite_ds)
+        save_nc(smoothed_ds, save_path='out/bobcat_2020_smoothed.nc')
 
     # viz -- sierra nevada orthorectification
     '''
