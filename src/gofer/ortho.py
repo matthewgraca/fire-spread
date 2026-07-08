@@ -179,7 +179,7 @@ def apply_ortho_map(
     goes_ds: xr.Dataset,
     ortho_map: xr.Dataset,
     *,
-    data_vars: Optional[Sequence[str]] = None
+    data_var: str | None = None
 ) -> xr.Dataset:
     """
     Apply precomputed orthorectification geometry to a GOES Dataset.
@@ -188,7 +188,7 @@ def apply_ortho_map(
     dimensions ``y`` and ``x`` are replaced by ``latitude`` and ``longitude`` via
     vectorized nearest-neighbor indexing in ABI scan-angle space.
     """
-    resolved_data_vars = resolve_data_vars(goes_ds, data_vars)
+    resolved_data_vars = resolve_data_vars(goes_ds, data_var)
 
     x_indexer = ortho_map["dem_px_angle_x"]
     y_indexer = ortho_map["dem_px_angle_y"]
@@ -232,7 +232,7 @@ def orthorectify(
     *,
     dem_filepath: str,
     bbox: BBox,
-    data_vars: Sequence[str] | None = None,
+    data_var: str | None = None,
     parallax_adjustment_factor=0.85,
     include_fixed_grid_diagnostics: bool = True,
 ) -> xr.Dataset:
@@ -254,7 +254,7 @@ def orthorectify(
     ortho = apply_ortho_map(
         goes_ds=goes_ds,
         ortho_map=ortho_map,
-        data_vars=data_vars,
+        data_var=data_var,
     )
 
     ortho.attrs.update(

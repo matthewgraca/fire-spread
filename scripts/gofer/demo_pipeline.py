@@ -41,7 +41,7 @@ def ortho(remapped_ds, dem_filepath, bbox):
         remapped_ds,
         dem_filepath=dem_filepath,
         bbox=bbox,
-        data_vars=["MaskConfidence"],
+        data_var="MaskConfidence",
     )
     print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(ortho_ds)
