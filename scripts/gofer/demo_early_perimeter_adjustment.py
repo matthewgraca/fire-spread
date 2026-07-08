@@ -1,5 +1,6 @@
 from gofer.early_perimeter_adjustment import *
 import xarray as xr
+import numpy as np
 import pickle
 
 with open('temp/metadata.pkl', 'rb') as f:
@@ -31,3 +32,10 @@ ortho_kwargs = {
 sf = get_scaling_factors(ds, ortho_kwargs=ortho_kwargs)
 print(len(sf))
 print(sf)
+
+out = apply_scaling_factors(ds, sf)
+print(out)
+
+diff = out['MaskConfidence'] - ds['MaskConfidence']
+max_diff = np.abs(diff).max()
+print(max_diff.values)

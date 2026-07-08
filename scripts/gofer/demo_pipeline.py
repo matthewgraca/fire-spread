@@ -1,3 +1,4 @@
+from gofer.ingest import download, read_calfire_geojson
 from gofer.ortho import orthorectify
 from gofer.remapper import map_fdc_mask_to_confidence 
 from gofer.composite import composite
@@ -7,6 +8,7 @@ from viz.gofer.ortho import (
 )
 from gofer.spatial_smoothing import smooth
 from gofer.temporal_downsampler import aggregate
+from gofer.early_perimeter_adjustment import *
 import pickle
 from pathlib import Path
 import time
@@ -121,11 +123,43 @@ def main():
     # parts of the pipeline to run
     # if one is False, all downstream should be False
     read = {
+        'ingest' : True,
         'aggregate' : True,
+        'scale' : True,
         'ortho' : True,
         'composite' : True,
         'smooth' : False
     }
+    if read['ingest']:
+        fire_name = 'bobcat'
+        calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
+        gdf = read_calfire_geojson(calfire_geojson_path)
+        fire = gdf.loc[gdf['FIRE_NAME'] == fire_name.upper()]
+
+        fire_attrs = {
+            'start' : fire['ALARM_DATE'].item(),
+            'end' : fire['CONT_DATE'].item(),
+            'fire_name' : str(fire['FIRE_NAME'].item()),
+            'fire_year' : int(fire['YEAR_'].item()),
+            'fire_acres' : int(fire['GIS_ACRES'].item())
+        }
+        bobcat_fire_bbox = {
+            'lon_min' : float(fire['bbox_min_lon'].item()),
+            'lon_max' : float(fire['bbox_max_lon'].item()),
+            'lat_min' : float(fire['bbox_min_lat'].item()),
+            'lat_max' : float(fire['bbox_max_lat'].item())
+        }
+
+        download(
+            **fire_attrs,
+            goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+            metadata_save_dir=f'temp/{fire_name}',
+            subhourly=True,
+            **fire_bbox
+        )
+    else:
+        pass
+
     # open, remap, ortho each satellite
     if read['aggregate']:
         west_goes_ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
@@ -145,12 +179,31 @@ def main():
         )
         save_nc(east_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_aggregated.nc')
 
+    if read['scale']:
+        west_scaled_ds = xr.open_dataset('temp/west_bobcat_2020_agg_scaled.nc', chunks={'time': 1})
+        east_scaled_ds = xr.open_dataset('temp/east_bobcat_2020_agg_scaled.nc', chunks={'time': 1})
+    else:
+        west_sf = get_scaling_factors(
+            west_goes_ds,
+            ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
+        )
+        west_scaled_ds = apply_scaling_factors(west_goes_ds, west_sf)
+        save_nc(west_scaled_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_agg_scaled.nc')
+
+        east_sf = get_scaling_factors(
+            east_goes_ds,
+            ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
+        )
+        east_scaled_ds = apply_scaling_factors(east_goes_ds, east_sf)
+        save_nc(west_scaled_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_agg_scaled.nc')
+
+
     if read['ortho']:
         west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
         east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
     else:
-        west_ortho_ds = ortho(west_goes_ds, dem_filepath, bbox)
-        east_ortho_ds = ortho(east_goes_ds, dem_filepath, bbox)
+        west_ortho_ds = ortho(west_scaled_ds, dem_filepath, bbox)
+        east_ortho_ds = ortho(east_scaled_ds, dem_filepath, bbox)
 
 
     # composite the two into one
