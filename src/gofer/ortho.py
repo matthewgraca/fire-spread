@@ -247,7 +247,7 @@ def orthorectify(
         goes_ds=goes_ds,
         dem_filepath=dem_filepath,
         bbox=bbox,
-        parallax_adjustment_factor=0.85,
+        parallax_adjustment_factor=parallax_adjustment_factor,
         include_fixed_grid_diagnostics=include_fixed_grid_diagnostics,
     )
 

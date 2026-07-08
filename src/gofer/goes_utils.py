@@ -69,14 +69,17 @@ def validate_xy_coords(goes_ds: xr.Dataset) -> None:
         raise ValueError("GOES dataset must have `x` and `y` fixed-grid coordinates.")
 
 
-def resolve_data_vars(goes_ds: xr.Dataset, data_vars: Optional[Sequence[str]] = None) -> list[str]:
+def resolve_data_vars(
+    goes_ds: xr.Dataset,
+    data_var: str | None
+) -> list[str]:
     """
     Resolve the GOES data variables to orthorectify.
 
     If ``data_vars`` is provided, those variables are selected. Otherwise, all
     variables with both ``y`` and ``x`` dimensions are selected.
     """
-    data_vars = data_vars if data_vars else vars_with_xy_dims(goes_ds)
+    data_vars = [data_var] if data_var else vars_with_xy_dims(goes_ds)
 
     if not data_vars:
         raise ValueError("No GOES data variables with both `y` and `x` dimensions found.")
