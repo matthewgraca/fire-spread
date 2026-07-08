@@ -21,11 +21,13 @@ with open('temp/metadata.pkl', 'rb') as f:
 
 # start after aggregate()
 ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
+#ds = xr.open_dataset('temp/east_bobcat_2020_aggregated.nc', chunks={"time": 1})
 print(ds)
 
 ortho_kwargs = {
     'dem_filepath' : dem_filepath,
     'bbox' : bbox
 }
-ds = get_scaling_factors(ds, ortho_kwargs=ortho_kwargs)
-print(ds)
+sf = get_scaling_factors(ds, ortho_kwargs=ortho_kwargs)
+print(len(sf))
+print(sf)
