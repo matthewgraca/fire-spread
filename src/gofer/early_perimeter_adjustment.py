@@ -4,7 +4,6 @@ import xarray as xr
 import numpy as np
 from gofer.spatial_smoothing import smooth
 from gofer.ortho import *
-from gofer.composite import dynamic_chunk
 from tqdm import tqdm
 
 

@@ -79,7 +79,7 @@ def composite(
         }
     ).to_dataset()
 
-    # merge on minimum value
+    # merge on mean value (for GOFER-Combined)
     combined_ds = combined_ds.mean(dim="satellite", skipna=True)
 
-    return _dynamic_chunk(combined_ds, data_var, target_chunk_mb=256)
+    return dynamic_chunk(combined_ds, data_var, target_chunk_mb=256)
