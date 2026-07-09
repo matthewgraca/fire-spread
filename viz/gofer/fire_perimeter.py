@@ -105,11 +105,11 @@ for i, d in tqdm(enumerate(ds['time'].values)):
     plt.close()
 '''
 ''' just final '''
-i, d = len(ds['time'].values) - 1, ds['time'].values[-1]
 tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
 fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
 
-mask_conf = ds["MaskConfidence"].isel(time=i)
+ds_cummax = ds['MaskConfidence'].cumulative('time').max()
+mask_conf = ds_cummax.isel(time=-1)
 # plot high-confidence only
 plot = mask_conf.where(mask_conf >= 0.95).plot(ax=axes, **plot_shared_kwargs)
 

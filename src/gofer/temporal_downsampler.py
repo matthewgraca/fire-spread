@@ -53,7 +53,7 @@ def _prune_invalid_and_pad_missing_timesteps(
         .sel(time=valid_dates)
         .reindex(
             time=target_time,
-            fill_value={data_var: np.float32(0)}
+            fill_value={data_var: np.float16(0)}
         )
     )
 
@@ -115,6 +115,6 @@ def aggregate(
 
     ds = xr.concat(datasets, dim='time')
     ds = _prune_invalid_and_pad_missing_timesteps(ds, dates, data_var)
+    ds = ds.chunk({'time' : 1})
 
     return ds
-

@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 import sys
 from dask.diagnostics import ProgressBar
+from tqdm.dask import TqdmCallback
 
 def aggregation(goes_save_dir, csv_path, dates):
     print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
@@ -72,7 +73,20 @@ def smoothing(ds):
     return smoothed_ds
 
 
-def save_nc(ds, save_path, chunk_size=None, data_var='MaskConfidence', show_progress=True):
+def save_nc(ds, save_path, chunk_size=None, chunks=None, data_var='MaskConfidence', position=''):
+    '''
+    Saves netcdf file. Also acts to realize the dask computation graph, 
+    evaluating the lazy computations so they don't get deferred later. 
+    Can be used as a checkpoint for each portion of the pipeline.
+
+    This is preferable over .compute() since some Datasets may be too 
+    large to fit into memory when performing the computations. Thus, 
+    the result will need to live somewhere other than RAM; hence the 
+    need to save it to disk, then loading it back to evaluate the graph.
+
+    chunk_size -> outgoing; requires a tuple
+    chunk -> loading; require a dictionary (maybe?)
+    '''
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     print(f'Saving to {save_path}...')
 
@@ -93,7 +107,8 @@ def save_nc(ds, save_path, chunk_size=None, data_var='MaskConfidence', show_prog
         if enc:
             encoding[name] = enc
 
-    with ProgressBar():
+    # realize the computation graph
+    with TqdmCallback(desc=f'Computing {position}'):
         ds.to_netcdf(
             str(save_path),
             mode="w",
@@ -101,9 +116,58 @@ def save_nc(ds, save_path, chunk_size=None, data_var='MaskConfidence', show_prog
             encoding=encoding
         )
 
+    # load it back
+    return xr.open_dataset(str(save_path), chunks=chunks)
+
+def open_ds(path, data_var='MaskConfidence', chunks={"time": 1}):
+    # opens the dataset in chunks and casts the data_var to float16
+    # NOTE now obsolete
+    ds = xr.open_dataset(path, chunks=chunks)
+    return ds
+
 
 def main():
-    with open('temp/metadata.pkl', 'rb') as f:
+    # parts of the pipeline to run
+    # if one is False, all downstream should be False
+    read = {
+        'ingest' : True,
+        'aggregate' : True,
+        'scale' : False,
+        'ortho' : False,
+        'composite' : False,
+        'smooth' : False
+    }
+    if read['ingest']:
+        pass
+    else:
+        fire_name = 'bobcat'
+        calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
+        gdf = read_calfire_geojson(calfire_geojson_path)
+        fire = gdf.loc[gdf['FIRE_NAME'] == fire_name.upper()]
+
+        fire_attrs = {
+            'start' : fire['ALARM_DATE'].item(),
+            'end' : fire['CONT_DATE'].item(),
+            'fire_name' : str(fire['FIRE_NAME'].item()),
+            'fire_year' : int(fire['YEAR_'].item()),
+            'fire_acres' : int(fire['GIS_ACRES'].item())
+        }
+        fire_bbox = {
+            'lon_min' : float(fire['bbox_min_lon'].item()),
+            'lon_max' : float(fire['bbox_max_lon'].item()),
+            'lat_min' : float(fire['bbox_min_lat'].item()),
+            'lat_max' : float(fire['bbox_max_lat'].item())
+        }
+
+        download(
+            **fire_attrs,
+            goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
+            metadata_save_dir=f'temp/{fire_name}',
+            subhourly=True,
+            **fire_bbox
+        )
+
+    with open('temp/bobcat/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
         dates = data['dates']
 
@@ -120,106 +184,113 @@ def main():
             'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
         )
 
-    # parts of the pipeline to run
-    # if one is False, all downstream should be False
-    read = {
-        'ingest' : True,
-        'aggregate' : True,
-        'scale' : True,
-        'ortho' : True,
-        'composite' : True,
-        'smooth' : False
-    }
-    if read['ingest']:
-        fire_name = 'bobcat'
-        calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
-        gdf = read_calfire_geojson(calfire_geojson_path)
-        fire = gdf.loc[gdf['FIRE_NAME'] == fire_name.upper()]
-
-        fire_attrs = {
-            'start' : fire['ALARM_DATE'].item(),
-            'end' : fire['CONT_DATE'].item(),
-            'fire_name' : str(fire['FIRE_NAME'].item()),
-            'fire_year' : int(fire['YEAR_'].item()),
-            'fire_acres' : int(fire['GIS_ACRES'].item())
-        }
-        bobcat_fire_bbox = {
-            'lon_min' : float(fire['bbox_min_lon'].item()),
-            'lon_max' : float(fire['bbox_max_lon'].item()),
-            'lat_min' : float(fire['bbox_min_lat'].item()),
-            'lat_max' : float(fire['bbox_max_lat'].item())
-        }
-
-        download(
-            **fire_attrs,
-            goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            metadata_save_dir=f'temp/{fire_name}',
-            subhourly=True,
-            **fire_bbox
-        )
-    else:
-        pass
 
     # open, remap, ortho each satellite
     if read['aggregate']:
-        west_goes_ds = xr.open_dataset('temp/west_bobcat_2020_aggregated.nc', chunks={"time": 1})
-        east_goes_ds = xr.open_dataset('temp/east_bobcat_2020_aggregated.nc', chunks={"time": 1})
+        west_goes_ds = open_ds('temp/west_bobcat_2020_aggregated.nc')
+        east_goes_ds = open_ds('temp/east_bobcat_2020_aggregated.nc')
     else:
         west_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path='/home/mgraca/Workspace/fire-spread/temp/west_files.csv',
+            csv_path='/home/mgraca/Workspace/fire-spread/temp/bobcat/west_files.csv',
             dates=dates
         )
-        save_nc(west_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_aggregated.nc')
+        west_goes_ds = save_nc(
+            west_goes_ds, 
+            chunk_size=(1, 1500, 2500),
+            save_path='temp/west_bobcat_2020_aggregated.nc',
+            chunks={'time': 1},
+            position='west aggregation'
+        )
 
         east_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path='/home/mgraca/Workspace/fire-spread/temp/east_files.csv',
+            csv_path='/home/mgraca/Workspace/fire-spread/temp/bobcat/east_files.csv',
             dates=dates
         )
-        save_nc(east_goes_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_aggregated.nc')
+        east_goes_ds = save_nc(
+            east_goes_ds,
+            chunk_size=(1, 1500, 2500),
+            save_path='temp/east_bobcat_2020_aggregated.nc',
+            chunks={'time': 1},
+            position='east aggregation'
+        )
 
     if read['scale']:
-        west_scaled_ds = xr.open_dataset('temp/west_bobcat_2020_agg_scaled.nc', chunks={'time': 1})
-        east_scaled_ds = xr.open_dataset('temp/east_bobcat_2020_agg_scaled.nc', chunks={'time': 1})
+        west_scaled_ds = open_ds('temp/west_bobcat_2020_agg_scaled.nc')
+        east_scaled_ds = open_ds('temp/east_bobcat_2020_agg_scaled.nc')
     else:
         west_sf = get_scaling_factors(
             west_goes_ds,
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         west_scaled_ds = apply_scaling_factors(west_goes_ds, west_sf)
-        save_nc(west_scaled_ds, chunk_size=(1, 1500, 2500), save_path='temp/west_bobcat_2020_agg_scaled.nc')
+        west_scaled_ds = save_nc(
+            west_scaled_ds,
+            chunk_size=(1, 1500, 2500),
+            save_path='temp/west_bobcat_2020_agg_scaled.nc',
+            chunks={'time': 1},
+            position='west scale factors'
+        )
 
         east_sf = get_scaling_factors(
             east_goes_ds,
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         east_scaled_ds = apply_scaling_factors(east_goes_ds, east_sf)
-        save_nc(west_scaled_ds, chunk_size=(1, 1500, 2500), save_path='temp/east_bobcat_2020_agg_scaled.nc')
+        east_scaled_ds = save_nc(
+            east_scaled_ds,
+            chunk_size=(1, 1500, 2500),
+            save_path='temp/east_bobcat_2020_agg_scaled.nc',
+            chunks={'time': 1},
+            position='east scale factors'
+        )
 
 
     if read['ortho']:
-        west_ortho_ds = xr.open_dataset('temp/west_bobcat_2020.nc')
-        east_ortho_ds = xr.open_dataset('temp/east_bobcat_2020.nc')
+        west_ortho_ds = open_ds('temp/west_bobcat_2020_ortho.nc', chunks='auto')
+        east_ortho_ds = open_ds('temp/east_bobcat_2020_ortho.nc', chunks='auto')
     else:
         west_ortho_ds = ortho(west_scaled_ds, dem_filepath, bbox)
+        west_ortho_ds = save_nc(
+            west_ortho_ds,
+            save_path='temp/west_bobcat_2020_ortho.nc',
+            chunks='auto',
+            position='west orthorectification'
+        )
         east_ortho_ds = ortho(east_scaled_ds, dem_filepath, bbox)
+        east_ortho_ds = save_nc(
+            east_ortho_ds,
+            save_path='temp/east_bobcat_2020_ortho.nc',
+            chunks='auto',
+            position='east orthorectification'
+        )
 
 
     # composite the two into one
     if read['composite']:
-        composite_ds = xr.open_dataset('temp/bobcat_2020_composited.nc')
+        composite_ds = open_ds('temp/bobcat_2020_composited.nc', chunks='auto')
     else:
         composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
-        save_nc(composite_ds, save_path='temp/bobcat_2020_composited.nc')
+        composite_ds = save_nc(
+            composite_ds, 
+            save_path='temp/bobcat_2020_composited.nc',
+            chunks='auto',
+            position='west compositing'
+        )
 
 
     # apply smooth edges 
     if read['smooth']: 
-        smoothed_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc')
+        smoothed_ds = open_ds('out/bobcat_2020_smoothed.nc', chunks='auto')
     else:
         smoothed_ds = smoothing(composite_ds)
-        save_nc(smoothed_ds, save_path='out/bobcat_2020_smoothed.nc')
+        smoothed_ds = save_nc(
+            smoothed_ds,
+            save_path='out/bobcat_2020_smoothed.nc',
+            chunks='auto',
+            position='east compositing'
+        )
 
     # viz -- sierra nevada orthorectification
     '''
