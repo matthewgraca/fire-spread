@@ -12,8 +12,8 @@ import xarray as xr
 MASK_CONFIDENCE_MAPPING = {
     10: 1.0,
     30: 1.0,  # Processed / Temporally Filtered
-    11: 0.9,
-    31: 0.9,  # Saturated / Temporally Filtered
+    11: 1.0,
+    31: 1.0,  # Saturated / Temporally Filtered
     12: 0.8,
     32: 0.8,  # Cloud contaminated / Temporally Filtered
     13: 0.5,
