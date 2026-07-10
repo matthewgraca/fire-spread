@@ -13,12 +13,49 @@ import pickle
 from pathlib import Path
 import time
 import xarray as xr
-from pathlib import Path
 import pandas as pd
 import numpy as np
 import sys
-from dask.diagnostics import ProgressBar
 from tqdm.dask import TqdmCallback
+from argparse import ArgumentParser
+import rioxarray
+
+parser = ArgumentParser(description='GOFER pipeline')
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--ingest', action='store_true', help='Start from ingest')
+group.add_argument('--aggregate', action='store_true', help='Start from aggregate')
+group.add_argument('--scale', action='store_true', help='Start from scale')
+group.add_argument('--ortho', action='store_true', help='Start from ortho')
+group.add_argument('--composite', action='store_true', help='Start from composite')
+group.add_argument('--smooth', action='store_true', help='Start from smooth')
+parser.add_argument('-f', '--fire', type=str, default='bobcat', help='Name of the fire to ingest')
+parser.add_argument('-y', '--year', type=int, default=2020, help='Year of the fire (to disambiguate fires that may share the same name)')
+args = parser.parse_args()
+
+pipeline_opts = {
+    'ingest' : args.ingest,
+    'aggregate' : args.aggregate,
+    'scale' : args.scale,
+    'ortho' : args.ortho,
+    'composite' : args.composite,
+    'smooth' : args.smooth 
+}
+if True not in set(list(pipeline_opts.values())):
+    raise ValueError('Define at least one part of the pipeline to start on.')
+pipeline = [
+    'ingest',
+    'aggregate',
+    'scale',
+    'ortho',
+    'composite',
+    'smooth',
+]
+run_pipeline = [True] * len(pipeline) 
+for i, action in enumerate(pipeline):
+    if pipeline_opts[action] is False:
+        run_pipeline[i] = False
+    else:
+        break
 
 def aggregation(goes_save_dir, csv_path, dates):
     print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
@@ -73,7 +110,7 @@ def smoothing(ds):
     return smoothed_ds
 
 
-def save_nc(ds, save_path, chunk_size=None, chunks=None, data_var='MaskConfidence', position=''):
+def eval_and_save_nc(ds, save_path, chunk_size=None, chunks=None, data_var='MaskConfidence', position=''):
     '''
     Saves netcdf file. Also acts to realize the dask computation graph, 
     evaluating the lazy computations so they don't get deferred later. 
@@ -127,23 +164,10 @@ def open_ds(path, data_var='MaskConfidence', chunks={"time": 1}):
 
 
 def main():
-    # parts of the pipeline to run
-    # if one is False, all downstream should be False
-    read = {
-        'ingest' : True,
-        'aggregate' : True,
-        'scale' : False,
-        'ortho' : False,
-        'composite' : False,
-        'smooth' : False
-    }
-    if read['ingest']:
-        pass
-    else:
-        fire_name = 'bobcat'
+    if run_pipeline[0]:
         calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
         gdf = read_calfire_geojson(calfire_geojson_path)
-        fire = gdf.loc[gdf['FIRE_NAME'] == fire_name.upper()]
+        fire = gdf.loc[gdf['FIRE_NAME'] == args.fire.upper()]
 
         fire_attrs = {
             'start' : fire['ALARM_DATE'].item(),
@@ -162,12 +186,14 @@ def main():
         download(
             **fire_attrs,
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            metadata_save_dir=f'temp/{fire_name}',
+            metadata_save_dir=f'temp/{args.fire}',
             subhourly=True,
             **fire_bbox
         )
+    else:
+        pass
 
-    with open('temp/bobcat/metadata.pkl', 'rb') as f:
+    with open(f'temp/{args.fire}/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
         dates = data['dates']
 
@@ -186,49 +212,48 @@ def main():
 
 
     # open, remap, ortho each satellite
-    if read['aggregate']:
-        west_goes_ds = open_ds('temp/west_bobcat_2020_aggregated.nc')
-        east_goes_ds = open_ds('temp/east_bobcat_2020_aggregated.nc')
-    else:
+    # aggregate
+    if run_pipeline[1]:
         west_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path='/home/mgraca/Workspace/fire-spread/temp/bobcat/west_files.csv',
+            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}/west_files.csv',
             dates=dates
         )
-        west_goes_ds = save_nc(
+        west_goes_ds = eval_and_save_nc(
             west_goes_ds, 
             chunk_size=(1, 1500, 2500),
-            save_path='temp/west_bobcat_2020_aggregated.nc',
+            save_path=f'temp/west_{args.fire}_2020_aggregated.nc',
             chunks={'time': 1},
             position='west aggregation'
         )
 
         east_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path='/home/mgraca/Workspace/fire-spread/temp/bobcat/east_files.csv',
+            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}/east_files.csv',
             dates=dates
         )
-        east_goes_ds = save_nc(
+        east_goes_ds = eval_and_save_nc(
             east_goes_ds,
             chunk_size=(1, 1500, 2500),
-            save_path='temp/east_bobcat_2020_aggregated.nc',
+            save_path=f'temp/east_{args.fire}_2020_aggregated.nc',
             chunks={'time': 1},
             position='east aggregation'
         )
-
-    if read['scale']:
-        west_scaled_ds = open_ds('temp/west_bobcat_2020_agg_scaled.nc')
-        east_scaled_ds = open_ds('temp/east_bobcat_2020_agg_scaled.nc')
     else:
+        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated.nc')
+        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated.nc')
+
+    # scale
+    if run_pipeline[2]:
         west_sf = get_scaling_factors(
             west_goes_ds,
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         west_scaled_ds = apply_scaling_factors(west_goes_ds, west_sf)
-        west_scaled_ds = save_nc(
+        west_scaled_ds = eval_and_save_nc(
             west_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path='temp/west_bobcat_2020_agg_scaled.nc',
+            save_path=f'temp/west_{args.fire}_2020_agg_scaled.nc',
             chunks={'time': 1},
             position='west scale factors'
         )
@@ -238,59 +263,79 @@ def main():
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         east_scaled_ds = apply_scaling_factors(east_goes_ds, east_sf)
-        east_scaled_ds = save_nc(
+        east_scaled_ds = eval_and_save_nc(
             east_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path='temp/east_bobcat_2020_agg_scaled.nc',
+            save_path=f'temp/east_{args.fire}_2020_agg_scaled.nc',
             chunks={'time': 1},
             position='east scale factors'
         )
-
-
-    if read['ortho']:
-        west_ortho_ds = open_ds('temp/west_bobcat_2020_ortho.nc', chunks='auto')
-        east_ortho_ds = open_ds('temp/east_bobcat_2020_ortho.nc', chunks='auto')
     else:
+        west_scaled_ds = open_ds(f'temp/west_{args.fire}_2020_agg_scaled.nc')
+        east_scaled_ds = open_ds(f'temp/east_{args.fire}_2020_agg_scaled.nc')
+
+
+    # ortho
+    if run_pipeline[3]:
         west_ortho_ds = ortho(west_scaled_ds, dem_filepath, bbox)
-        west_ortho_ds = save_nc(
+        west_ortho_ds = eval_and_save_nc(
             west_ortho_ds,
-            save_path='temp/west_bobcat_2020_ortho.nc',
+            save_path=f'temp/west_{args.fire}_2020_ortho.nc',
             chunks='auto',
             position='west orthorectification'
         )
         east_ortho_ds = ortho(east_scaled_ds, dem_filepath, bbox)
-        east_ortho_ds = save_nc(
+        east_ortho_ds = eval_and_save_nc(
             east_ortho_ds,
-            save_path='temp/east_bobcat_2020_ortho.nc',
+            save_path=f'temp/east_{args.fire}_2020_ortho.nc',
             chunks='auto',
             position='east orthorectification'
         )
+    else:
+        west_ortho_ds = open_ds(f'temp/west_{args.fire}_2020_ortho.nc', chunks='auto')
+        east_ortho_ds = open_ds(f'temp/east_{args.fire}_2020_ortho.nc', chunks='auto')
 
 
     # composite the two into one
-    if read['composite']:
-        composite_ds = open_ds('temp/bobcat_2020_composited.nc', chunks='auto')
-    else:
+    if run_pipeline[4]:
         composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
-        composite_ds = save_nc(
+        composite_ds = eval_and_save_nc(
             composite_ds, 
-            save_path='temp/bobcat_2020_composited.nc',
+            save_path=f'temp/{args.fire}_2020_composited.nc',
             chunks='auto',
             position='west compositing'
         )
+    else:
+        composite_ds = open_ds(f'temp/{args.fire}_2020_composited.nc', chunks='auto')
 
 
     # apply smooth edges 
-    if read['smooth']: 
-        smoothed_ds = open_ds('out/bobcat_2020_smoothed.nc', chunks='auto')
-    else:
+    if run_pipeline[5]:
         smoothed_ds = smoothing(composite_ds)
-        smoothed_ds = save_nc(
+        smoothed_ds = eval_and_save_nc(
             smoothed_ds,
-            save_path='out/bobcat_2020_smoothed.nc',
+            save_path=f'out/{args.fire}_2020_smoothed.nc',
             chunks='auto',
             position='east compositing'
         )
+    else:
+        smoothed_ds = open_ds(f'out/{args.fire}_2020_smoothed.nc', chunks='auto')
+
+
+    ''' crack at 50m resampling
+    ds_50m = (smoothed_ds
+        .rio.set_spatial_dims(x_dim='latitude', y_dim='longitude')
+        .rio.write_crs('EPSG:4326')
+        .rio.reproject('EPSG:3310', resolution=50, resampling='nearest')
+        .rio.reproject('EPSG:4326')
+    )
+    ds_50m = eval_and_save_nc(
+        ds_50m,
+        save_path=f'temp/{args.fire}_2020_downscaled.nc',
+        chunks='auto',
+        position='50m downscaling'
+    )
+    '''
 
     # viz -- sierra nevada orthorectification
     '''

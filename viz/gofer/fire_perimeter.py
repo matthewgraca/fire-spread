@@ -25,7 +25,7 @@ with open('temp/metadata.pkl', 'rb') as f:
         goes_files['lat_max'] + buffer
     ]
 
-combined_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc')
+combined_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc', chunks='auto')
 
 plot_shared_kwargs = {
     'transform' : ccrs.PlateCarree(),
@@ -39,12 +39,6 @@ print(combined_ds["time"])
 time_start = combined_ds["time"].coarsen(time=12, boundary="trim").min()
 time_end = combined_ds["time"].coarsen(time=12, boundary="trim").max()
 # groups into non-overlapping 12 frame chunks
-'''
-ds = (
-    combined_ds.coarsen(time=12, boundary='trim')
-    .max()
-)
-'''
 # same, but a cumulative max
 ds = (
     combined_ds.coarsen(time=12, boundary='trim')
@@ -52,15 +46,11 @@ ds = (
     .cumulative(dim='time')
     .max()
 )
-# this MERGES all 12 frame chunks, NOT skipping! that's:
-'''
-#ds = ds.isel(time=slice(None, None, 12))
-'''
 ds = ds.assign_coords(
     time_start=("time", time_start.data),
     time_end=("time", time_end.data),
 )
-print(ds)
+#print(ds)
 
 gdf = gpd.read_file("data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson")
 bobcat_fire = gdf.loc[gdf['FIRE_NAME'] == 'BOBCAT']
@@ -108,7 +98,8 @@ for i, d in tqdm(enumerate(ds['time'].values)):
 tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
 fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
 
-ds_cummax = ds['MaskConfidence'].cumulative('time').max()
+# cummax over whole ds
+ds_cummax = combined_ds['MaskConfidence'].cumulative('time').max()
 mask_conf = ds_cummax.isel(time=-1)
 # plot high-confidence only
 plot = mask_conf.where(mask_conf >= 0.95).plot(ax=axes, **plot_shared_kwargs)
@@ -132,7 +123,8 @@ cbar = fig.colorbar(
 
 cbar.set_label("Fire Confidence")
 
-dt_start = pd.to_datetime(mask_conf['time_start'].item())
+'''
+dt_start = pd.to_datetime(mask_conf['time'].item())
 dt_end = pd.to_datetime(mask_conf['time_end'].item())
 
 axes.set_title(
@@ -142,4 +134,7 @@ axes.set_title(
 )
 
 plt.savefig(f"out/gofer/{dt_end.strftime('%Y-%m-%dT%H:%M:%S')}.png")
+'''
+axes.set_title(f"GOFER")
+plt.savefig(f"out/gofer/bobcat.png")
 plt.close()
