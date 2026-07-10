@@ -146,6 +146,8 @@ def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silen
         except FileNotFoundError as e:
             tqdm.write(f'Data for {date} missing for GOES-{satellite}.')
             error_hit = True
+        except KeyboardInterrupt:
+            raise
         except:
             tqdm.write(f'Data for {date} missing/corrupted for GOES-{satellite}.')
             error_hit = True
