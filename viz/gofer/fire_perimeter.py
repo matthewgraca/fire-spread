@@ -26,6 +26,7 @@ with open('temp/metadata.pkl', 'rb') as f:
     ]
 
 combined_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc', chunks='auto')
+print(combined_ds)
 
 plot_shared_kwargs = {
     'transform' : ccrs.PlateCarree(),
@@ -35,7 +36,8 @@ plot_shared_kwargs = {
     'add_colorbar' : False
 }
 
-print(combined_ds["time"])
+#print(combined_ds["time"])
+'''
 time_start = combined_ds["time"].coarsen(time=12, boundary="trim").min()
 time_end = combined_ds["time"].coarsen(time=12, boundary="trim").max()
 # groups into non-overlapping 12 frame chunks
@@ -50,6 +52,7 @@ ds = ds.assign_coords(
     time_start=("time", time_start.data),
     time_end=("time", time_end.data),
 )
+'''
 #print(ds)
 
 gdf = gpd.read_file("data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson")

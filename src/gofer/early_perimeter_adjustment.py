@@ -14,10 +14,12 @@ def get_scaling_factors(
     show_progress: bool = True
 ) -> np.ndarray:
     '''
+    Assumes a Dataset of cumulative max fire confidences is passed.
+
     For each hour h:
 
-        Gather the confidences from hour [1, h]
-        Calculate the cumulative max of the confidences from [1, h]
+        x Gather the confidences from hour [1, h]
+        x Calculate the cumulative max of the confidences from [1, h]
         Parallax adjustment
         Apply spatial smoothing
         Calculate the max confidence of the entire frame s_h; the scaling factor
@@ -31,27 +33,12 @@ def get_scaling_factors(
     times = ds['time'].values
     capped_times = times[:MAX_TIME]
     scaling_factors = [1.0] * len(times)
-    running = None
     ortho_map = make_ortho_map(ds, **ortho_kwargs)
-    if show_progress:
-        tqdm.write(
-            f'Calculating scaling factors for the first '
-            f'{len(capped_times)} timesteps'
-        )
-    for i, t in (
-        enumerate(tqdm(capped_times))
-        if show_progress else enumerate(capped_times)
-    ):
+    for i, t in enumerate(capped_times):
         ds_t = ds.isel({'time' : i}).load()
         ds_t = apply_ortho_map(ds_t, ortho_map, data_var=data_var)
         ds_t = smooth(ds_t, input_variable=data_var)
-
-        if running is None:
-            running = ds_t[data_var].values
-        else:
-            running = xr.apply_ufunc(np.fmax, running, ds_t[data_var], dask='allowed')
-
-        s_t = float(np.max(running))
+        s_t = float(np.max(ds_t[data_var].values))
         '''
         tqdm.write(
             f'{t} '
@@ -66,8 +53,10 @@ def get_scaling_factors(
             f'mean: {np.mean(running).item()}, \n'
         )
         '''
-        
-        scaling_factors[i] = s_t
+        if s_t == 1.0:
+            break
+        else:
+            scaling_factors[i] = s_t
 
     #tqdm.write(f'Intermediary scaling factors: {scaling_factors}')
 

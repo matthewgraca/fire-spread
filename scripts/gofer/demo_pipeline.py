@@ -56,6 +56,8 @@ for i, action in enumerate(pipeline):
         run_pipeline[i] = False
     else:
         break
+print('Pipeline active:')
+print([f'{x}: {y}' for x, y in zip(pipeline, run_pipeline)])
 
 def aggregation(goes_save_dir, csv_path, dates):
     print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
@@ -223,7 +225,7 @@ def main():
             west_goes_ds, 
             chunk_size=(1, 1500, 2500),
             save_path=f'temp/west_{args.fire}_2020_aggregated.nc',
-            chunks={'time': 1},
+            chunks='auto',
             position='west aggregation'
         )
 
@@ -236,12 +238,55 @@ def main():
             east_goes_ds,
             chunk_size=(1, 1500, 2500),
             save_path=f'temp/east_{args.fire}_2020_aggregated.nc',
-            chunks={'time': 1},
+            chunks='auto',
             position='east aggregation'
         )
     else:
-        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated.nc')
-        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated.nc')
+        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated.nc', chunks='auto')
+        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated.nc', chunks='auto')
+
+    # cummax and select timestep to generate perimeter for
+    # may get folded into aggregate, depending on if we actually need the original
+    # a compromise could be another variable, like
+    # MaskConfidenceBurnedArea vs MaskConfidenceActiveFire.
+    print(west_goes_ds)
+    print(east_goes_ds)
+    #west_goes_ds['MaskConfidence'] = west_goes_ds['MaskConfidence'].cumulative('time').max()
+    #east_goes_ds['MaskConfdience'] = east_goes_ds['MaskConfidence'].cumulative('time').max()
+
+    if False:
+        def cummax(ds: xr.Dataset, data_var: str = 'MaskConfidence') -> xr.Dataset:
+            ds = ds.load() # clear dask backing to get an O(1) space solution
+            arr = ds[data_var].data
+
+            # In-place cumulative max along time
+            for i in range(1, arr.shape[0]):
+                np.fmax(arr[i - 1], arr[i], out=arr[i])
+
+            return ds.chunk({'time': 1})
+
+        west_goes_ds = cummax(west_goes_ds)
+        west_goes_ds = eval_and_save_nc(
+            west_goes_ds, 
+            chunk_size=(1, 1500, 2500),
+            save_path=f'temp/west_{args.fire}_2020_aggregated_cummax.nc',
+            chunks='auto',
+            position='west aggregation and cummax'
+        )
+
+        east_goes_ds = cummax(east_goes_ds)
+        east_goes_ds = eval_and_save_nc(
+            east_goes_ds, 
+            chunk_size=(1, 1500, 2500),
+            save_path=f'temp/east_{args.fire}_2020_aggregated_cummax.nc',
+            chunks='auto',
+            position='east aggregation and cummax'
+        )
+    else:
+        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated_cummax.nc')
+        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated_cummax.nc')
+        print(west_goes_ds)
+        print(east_goes_ds)
 
     # scale
     if run_pipeline[2]:
@@ -274,6 +319,9 @@ def main():
         west_scaled_ds = open_ds(f'temp/west_{args.fire}_2020_agg_scaled.nc')
         east_scaled_ds = open_ds(f'temp/east_{args.fire}_2020_agg_scaled.nc')
 
+    # NOTE we currently only care about the final fire perimeter from here on out
+    west_scaled_ds = west_scaled_ds.isel(time=[-1])
+    east_scaled_ds = east_scaled_ds.isel(time=[-1])
 
     # ortho
     if run_pipeline[3]:
