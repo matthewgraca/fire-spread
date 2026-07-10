@@ -5,9 +5,6 @@ At a high level, the GOFER algorithm is simply a way to draw fire perimeters usi
 
 ![](https://essd.copernicus.org/articles/16/1395/2024/essd-16-1395-2024-avatar-web.png)
 
-# Remapping
-As a part of the GOFER algorithm pulled from [**Google's Restif and Hoffman**](https://medium.com/google-earth/how-to-generate-wildfire-boundary-maps-with-earth-engine-b38eadc97a38), fire mask values are converted to confidence values. These confidence values effectively parameterize the mask, introducing acceptable/unacceptable thresholds for determining if a fire pixel should be included/excluded on the basis of criteria like quality and agreement between the two satellites on if fire occupies the same pixel.
-
 # Ingest
 ## GOES AWS
 Ingestion pipeline uses [**goes2go**](https://goes2go.readthedocs.io/en/latest/) by Brian Blaylock. Not the fastest thing in the world, but it's proven to be robust and gets the job done as a downloader for GOES data.
@@ -32,6 +29,12 @@ The pipeline also includes using CalFire/FRAP's [**California Fire Perimeters da
 
 ### Readings
 Play around with perimeter data on CalFire's Esri map: https://www.fire.ca.gov/what-we-do/fire-resource-assessment-program/fire-perimeters
+
+# Remapping
+The original data from the GOES `Mask` product is defined such that each pixel has a mask category. As a part of the GOFER algorithm pulled from [**Google's Restif and Hoffman**](https://medium.com/google-earth/how-to-generate-wildfire-boundary-maps-with-earth-engine-b38eadc97a38), fire mask values are converted to confidence values. These confidence values effectively parameterize the mask, introducing acceptable/unacceptable thresholds for determining if a fire pixel should be included/excluded on the basis of criteria like quality and agreement between the two satellites on if fire occupies the same pixel.
+
+Here's what the mapping looks like:
+![](https://essd.copernicus.org/articles/16/1395/2024/essd-16-1395-2024-t04-web.png)
 
 # Temporal Downsampler
 While the GOFER product is hourly, it makes use of the fact that GOES produces observations every 5 minutes (for 12 observations per hour). GOFER leverages this extra data by grabbing all the subhourly observations, remapping the pixels to confidence values, then grabbing the max confidence pixels.

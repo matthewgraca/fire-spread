@@ -1,8 +1,12 @@
 # user-defined
 #   out/ should be output for scripts, usually visualizations
+#   data/ contains raw data, such as the direct GOES netcdf files
+#   temp/ contains intermediate data; usually intermediate netcdf files or metadata pkl files
 #   nc files for tests are massive; it makes the code untestable if you don't 
 #       have them, so I'm not sure the best way to include them.
 out/ 
+data/
+temp/
 *.nc
 *.swp
 
