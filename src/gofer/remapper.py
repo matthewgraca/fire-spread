@@ -125,13 +125,12 @@ def map_fdc_mask_to_confidence(
     # slot in MaskConfidence to the Dataset, while dropping the intermediaries
     out = goes_ds.drop_vars(["Mask", "DQF"])
     out["MaskConfidence"] = conf
-    out.attrs.update(
+    out["MaskConfidence"].attrs.update(
         {
             "long_name": "Fire mask confidence",
             "description": "Confidence score derived from GOES FDC Mask values.",
             "valid_min": 0.0,
             "valid_max": 1.0,
-            "source_variable": "Mask",
             "confidence_mapping": str(confidence_mapping),
         }
     )

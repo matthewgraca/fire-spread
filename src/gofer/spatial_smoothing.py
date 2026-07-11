@@ -99,14 +99,9 @@ def smooth(
     out[input_variable] = xr.DataArray(
         smoothed_values,
         dims=da.dims,
-        coords=da.coords,
-        attrs={
-            **da.attrs,
-            "smoothing":(
-                f"{kernel_size}x{kernel_size} spatial uniform filter "
-                "over latitude/longitude"
-            ),
-        },
+        coords=da.coords
     )
+
+    out = out.assign_attrs(pipeline='smoothed')
 
     return out

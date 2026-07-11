@@ -41,7 +41,8 @@ def composite(
     west_ds: xr.Dataset,
     east_ds: xr.Dataset,
     dates: pd.DatetimeIndex,
-    data_var: str
+    data_var: str,
+    keep_attrs: dict = {'fire_name', 'description', 'active_fire', 'fire_perimeter'}
 ) -> xr.Dataset:
     """
     Concatenates the dataset of east and west observations by time, filling  
@@ -55,9 +56,11 @@ def composite(
         east_ds: The GOES-East Dataset.
         dates: The sequence of dates the two datasets will be aligned with
         data_var: The data variable subject to concatentation.
+        keep_attrs: Attributes to keep. Composite is the last fusing step, 
+            so this is where we shed a ton of attributes.
 
     Returns:
-        xr.Dataset: A dataset merged according to the minimum data variable.
+        xr.Dataset: A dataset merged according to the mean data variable.
         Also spatially chunks the data for memory efficiency.
     """
     combined_ds = xr.concat(
@@ -81,5 +84,13 @@ def composite(
 
     # merge on mean value (for GOFER-Combined)
     combined_ds = combined_ds.mean(dim="satellite", skipna=True)
+
+    combined_ds = combined_ds.assign_attrs(
+        pipeline='composited',
+        **{
+            k: west_ds.attrs[k]
+            for k in west_ds.attrs if k in keep_attrs 
+        }
+    )
 
     return dynamic_chunk(combined_ds, data_var, target_chunk_mb=256)

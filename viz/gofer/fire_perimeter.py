@@ -8,7 +8,7 @@ import pickle
 from tqdm import tqdm
 from viz.gofer.tilers import CartoDBTiles
 
-with open('temp/metadata.pkl', 'rb') as f:
+with open('temp/bobcat_2020/metadata.pkl', 'rb') as f:
     goes_files = pickle.load(f)
     dates = goes_files['dates']
     buffer = 0.1
@@ -25,7 +25,7 @@ with open('temp/metadata.pkl', 'rb') as f:
         goes_files['lat_max'] + buffer
     ]
 
-combined_ds = xr.open_dataset('out/bobcat_2020_smoothed.nc', chunks='auto')
+combined_ds = xr.open_dataset('out/bobcat_2020_gofer.nc', chunks='auto')
 print(combined_ds)
 
 plot_shared_kwargs = {
@@ -102,8 +102,8 @@ tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
 fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
 
 # cummax over whole ds
-ds_cummax = combined_ds['MaskConfidence'].cumulative('time').max()
-mask_conf = ds_cummax.isel(time=-1)
+#ds_cummax = combined_ds['MaskConfidence'].cumulative('time').max()
+mask_conf = combined_ds['MaskConfidence'].isel(time=-1)
 # plot high-confidence only
 plot = mask_conf.where(mask_conf >= 0.95).plot(ax=axes, **plot_shared_kwargs)
 
