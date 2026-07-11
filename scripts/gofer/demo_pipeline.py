@@ -112,14 +112,6 @@ def smoothing(ds):
     return smoothed_ds
 
 
-
-def open_ds(path, data_var='MaskConfidence', chunks={"time": 1}):
-    # opens the dataset in chunks and casts the data_var to float16
-    # NOTE now obsolete
-    ds = xr.open_dataset(path, chunks=chunks)
-    return ds
-
-
 def main():
     if run_pipeline[0]:
         calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
@@ -201,15 +193,10 @@ def main():
             desc='east aggregation'
         )
     else:
-        west_goes_ds = open_ds(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
-        east_goes_ds = open_ds(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
-
-    # cummax and select timestep to generate perimeter for
-    # may get folded into aggregate, depending on if we actually need the original
-    # a compromise could be another variable, like
-    # MaskConfidenceBurnedArea vs MaskConfidenceActiveFire.
-    print(west_goes_ds)
-    print(east_goes_ds)
+        west_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
+        east_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
+        print(west_goes_ds)
+        print(east_goes_ds)
 
     # scale
     if run_pipeline[2]:
@@ -239,8 +226,8 @@ def main():
             desc='east scale factors'
         )
     else:
-        west_scaled_ds = open_ds(f'temp/{args.fire}_{args.year}/west/scaled.nc')
-        east_scaled_ds = open_ds(f'temp/{args.fire}_{args.year}/east/scaled.nc')
+        west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc')
+        east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc')
 
     # NOTE we currently only care about the final fire perimeter from here on out
     west_scaled_ds = west_scaled_ds.isel(time=[-1])
@@ -263,8 +250,8 @@ def main():
             desc='east orthorectification'
         )
     else:
-        west_ortho_ds = open_ds(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
-        east_ortho_ds = open_ds(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
+        west_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
+        east_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
 
 
     # composite the two into one
@@ -277,7 +264,7 @@ def main():
             desc='west compositing'
         )
     else:
-        composite_ds = open_ds(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
+        composite_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
 
 
     # apply smooth edges 
@@ -290,7 +277,7 @@ def main():
             desc='east compositing'
         )
     else:
-        smoothed_ds = open_ds(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
+        smoothed_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
 
 
     ''' crack at 50m resampling
