@@ -1,6 +1,8 @@
 from __future__ import annotations
 import xarray as xr
 import numpy as np
+from pathlib import Path
+from tqdm.dask import TqdmCallback
 
 GRS80_ECCENTRICITY = 0.0818191910435
 
@@ -101,3 +103,65 @@ def resolve_data_vars(
 
     return data_vars
 
+
+def eval_and_save_nc(
+    ds: xr.Dataset,
+    save_path: str,
+    chunk_size: tuple | None = None,
+    chunks: dict | None = None,
+    data_var: str = 'MaskConfidence',
+    desc: str = '...',
+    verbose: bool = True
+):
+    '''
+    Saves netcdf file. Also acts to realize the dask computation graph, 
+    evaluating the lazy computations so they don't get deferred later. 
+    Can be used as a checkpoint for each portion of the pipeline.
+
+    This is preferable over .compute() since some Datasets may be too 
+    large to fit into memory when performing the computations. Thus, 
+    the result will need to live somewhere other than RAM; hence the 
+    need to save it to disk, then loading it back to evaluate the graph.
+
+    chunk_size -> outgoing; requires a tuple
+    chunk -> loading; require a dictionary (maybe?)
+    '''
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    if verbose:
+        print(f'Saving to {save_path}...')
+
+    encoding = {}
+    for name, da in ds.variables.items():
+        # clear encodings, only MaskConfidence encodings matter
+        da.encoding.clear()
+        enc = {}
+
+        # for anything with a float, have the fill value be np.nan
+        if np.issubdtype(da.dtype, np.floating):
+            enc["_FillValue"] = np.nan
+
+        # pass in a chunk size. Unfortunately, to_netcdf doesn't infer this
+        if name == data_var:
+            enc["dtype"] = "uint8"
+            enc["scale_factor"] = np.float32(0.01)
+            enc["add_offset"] = np.float32(0.0)
+            enc["_FillValue"] = np.uint8(255)
+            enc["chunksizes"] = chunk_size
+            enc["zlib"] = False
+
+        if enc:
+            encoding[name] = enc
+
+    # realize the computation graph
+    with TqdmCallback(desc=f'Computing and saving {desc}' if verbose else None):
+        # swap from netcdf4. has loud harmless errors when writing to a 
+        #   netcdf file that doesn't already exist
+        ds.to_netcdf(
+            str(save_path),
+            mode="w",
+            engine="h5netcdf", 
+            encoding=encoding
+        )
+
+    # load it back
+    return xr.open_dataset(str(save_path), chunks=chunks)

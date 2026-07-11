@@ -9,6 +9,7 @@ from viz.gofer.ortho import (
 from gofer.spatial_smoothing import smooth
 from gofer.temporal_downsampler import aggregate
 from gofer.early_perimeter_adjustment import *
+from gofer.goes_utils import eval_and_save_nc
 import pickle
 from pathlib import Path
 import time
@@ -16,7 +17,6 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import sys
-from tqdm.dask import TqdmCallback
 from argparse import ArgumentParser
 import rioxarray
 
@@ -59,10 +59,10 @@ for i, action in enumerate(pipeline):
 print('Pipeline active:')
 print([f'{x}: {y}' for x, y in zip(pipeline, run_pipeline)])
 
-def aggregation(goes_save_dir, csv_path, dates):
+def aggregation(goes_save_dir, csv_path, temp_dir, dates, fire_name):
     print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
     start_time = time.perf_counter()
-    ds = aggregate(goes_save_dir, csv_path, dates)
+    ds = aggregate(goes_save_dir, csv_path, temp_dir, dates, fire_name=fire_name)
     print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(ds)
     return ds 
@@ -112,51 +112,6 @@ def smoothing(ds):
     return smoothed_ds
 
 
-def eval_and_save_nc(ds, save_path, chunk_size=None, chunks=None, data_var='MaskConfidence', position=''):
-    '''
-    Saves netcdf file. Also acts to realize the dask computation graph, 
-    evaluating the lazy computations so they don't get deferred later. 
-    Can be used as a checkpoint for each portion of the pipeline.
-
-    This is preferable over .compute() since some Datasets may be too 
-    large to fit into memory when performing the computations. Thus, 
-    the result will need to live somewhere other than RAM; hence the 
-    need to save it to disk, then loading it back to evaluate the graph.
-
-    chunk_size -> outgoing; requires a tuple
-    chunk -> loading; require a dictionary (maybe?)
-    '''
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    print(f'Saving to {save_path}...')
-
-    encoding = {}
-    for name, da in ds.variables.items():
-        enc = {}
-
-        # for anything with a float, have the fill value be np.nan
-        if np.issubdtype(da.dtype, np.floating):
-            enc["_FillValue"] = np.nan
-
-        # pass in a chunk size. Unfortunately, to_netcdf doesn't infer this
-        if chunk_size is not None:
-            if name == data_var:
-                enc["chunksizes"] = chunk_size
-                enc["zlib"] = False
-
-        if enc:
-            encoding[name] = enc
-
-    # realize the computation graph
-    with TqdmCallback(desc=f'Computing {position}'):
-        ds.to_netcdf(
-            str(save_path),
-            mode="w",
-            engine="netcdf4",
-            encoding=encoding
-        )
-
-    # load it back
-    return xr.open_dataset(str(save_path), chunks=chunks)
 
 def open_ds(path, data_var='MaskConfidence', chunks={"time": 1}):
     # opens the dataset in chunks and casts the data_var to float16
@@ -188,14 +143,14 @@ def main():
         download(
             **fire_attrs,
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            metadata_save_dir=f'temp/{args.fire}',
+            metadata_save_dir=f'temp/{args.fire}_{args.year}',
             subhourly=True,
             **fire_bbox
         )
     else:
         pass
 
-    with open(f'temp/{args.fire}/metadata.pkl', 'rb') as f:
+    with open(f'temp/{args.fire}_{args.year}/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
         dates = data['dates']
 
@@ -218,32 +173,36 @@ def main():
     if run_pipeline[1]:
         west_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}/west_files.csv',
-            dates=dates
+            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}_{args.year}/west_files.csv',
+            temp_dir=f'temp/{args.fire}_{args.year}/west/hourly',
+            dates=dates,
+            fire_name=args.fire.upper()
         )
         west_goes_ds = eval_and_save_nc(
             west_goes_ds, 
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/west_{args.fire}_2020_aggregated.nc',
+            save_path=f'temp/{args.fire}_{args.year}/west/aggregated.nc',
             chunks='auto',
-            position='west aggregation'
+            desc='west aggregation'
         )
 
         east_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}/east_files.csv',
-            dates=dates
+            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}_{args.year}/east_files.csv',
+            temp_dir=f'temp/{args.fire}_{args.year}/east/hourly',
+            dates=dates,
+            fire_name=args.fire.upper()
         )
         east_goes_ds = eval_and_save_nc(
             east_goes_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/east_{args.fire}_2020_aggregated.nc',
+            save_path=f'temp/{args.fire}_{args.year}/east/aggregated.nc',
             chunks='auto',
-            position='east aggregation'
+            desc='east aggregation'
         )
     else:
-        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated.nc', chunks='auto')
-        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated.nc', chunks='auto')
+        west_goes_ds = open_ds(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
+        east_goes_ds = open_ds(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
 
     # cummax and select timestep to generate perimeter for
     # may get folded into aggregate, depending on if we actually need the original
@@ -251,42 +210,6 @@ def main():
     # MaskConfidenceBurnedArea vs MaskConfidenceActiveFire.
     print(west_goes_ds)
     print(east_goes_ds)
-    #west_goes_ds['MaskConfidence'] = west_goes_ds['MaskConfidence'].cumulative('time').max()
-    #east_goes_ds['MaskConfdience'] = east_goes_ds['MaskConfidence'].cumulative('time').max()
-
-    if False:
-        def cummax(ds: xr.Dataset, data_var: str = 'MaskConfidence') -> xr.Dataset:
-            ds = ds.load() # clear dask backing to get an O(1) space solution
-            arr = ds[data_var].data
-
-            # In-place cumulative max along time
-            for i in range(1, arr.shape[0]):
-                np.fmax(arr[i - 1], arr[i], out=arr[i])
-
-            return ds.chunk({'time': 1})
-
-        west_goes_ds = cummax(west_goes_ds)
-        west_goes_ds = eval_and_save_nc(
-            west_goes_ds, 
-            chunk_size=(1, 1500, 2500),
-            save_path=f'temp/west_{args.fire}_2020_aggregated_cummax.nc',
-            chunks='auto',
-            position='west aggregation and cummax'
-        )
-
-        east_goes_ds = cummax(east_goes_ds)
-        east_goes_ds = eval_and_save_nc(
-            east_goes_ds, 
-            chunk_size=(1, 1500, 2500),
-            save_path=f'temp/east_{args.fire}_2020_aggregated_cummax.nc',
-            chunks='auto',
-            position='east aggregation and cummax'
-        )
-    else:
-        west_goes_ds = open_ds(f'temp/west_{args.fire}_2020_aggregated_cummax.nc')
-        east_goes_ds = open_ds(f'temp/east_{args.fire}_2020_aggregated_cummax.nc')
-        print(west_goes_ds)
-        print(east_goes_ds)
 
     # scale
     if run_pipeline[2]:
@@ -298,9 +221,9 @@ def main():
         west_scaled_ds = eval_and_save_nc(
             west_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/west_{args.fire}_2020_agg_scaled.nc',
+            save_path=f'temp/{args.fire}_{args.year}/west/scaled.nc',
             chunks={'time': 1},
-            position='west scale factors'
+            desc='west scale factors'
         )
 
         east_sf = get_scaling_factors(
@@ -311,13 +234,13 @@ def main():
         east_scaled_ds = eval_and_save_nc(
             east_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/east_{args.fire}_2020_agg_scaled.nc',
+            save_path=f'temp/{args.fire}_{args.year}/east/scaled.nc',
             chunks={'time': 1},
-            position='east scale factors'
+            desc='east scale factors'
         )
     else:
-        west_scaled_ds = open_ds(f'temp/west_{args.fire}_2020_agg_scaled.nc')
-        east_scaled_ds = open_ds(f'temp/east_{args.fire}_2020_agg_scaled.nc')
+        west_scaled_ds = open_ds(f'temp/{args.fire}_{args.year}/west/scaled.nc')
+        east_scaled_ds = open_ds(f'temp/{args.fire}_{args.year}/east/scaled.nc')
 
     # NOTE we currently only care about the final fire perimeter from here on out
     west_scaled_ds = west_scaled_ds.isel(time=[-1])
@@ -328,20 +251,20 @@ def main():
         west_ortho_ds = ortho(west_scaled_ds, dem_filepath, bbox)
         west_ortho_ds = eval_and_save_nc(
             west_ortho_ds,
-            save_path=f'temp/west_{args.fire}_2020_ortho.nc',
+            save_path=f'temp/{args.fire}_{args.year}/west/ortho.nc',
             chunks='auto',
-            position='west orthorectification'
+            desc='west orthorectification'
         )
         east_ortho_ds = ortho(east_scaled_ds, dem_filepath, bbox)
         east_ortho_ds = eval_and_save_nc(
             east_ortho_ds,
-            save_path=f'temp/east_{args.fire}_2020_ortho.nc',
+            save_path=f'temp/{args.fire}_{args.year}/east/ortho.nc',
             chunks='auto',
-            position='east orthorectification'
+            desc='east orthorectification'
         )
     else:
-        west_ortho_ds = open_ds(f'temp/west_{args.fire}_2020_ortho.nc', chunks='auto')
-        east_ortho_ds = open_ds(f'temp/east_{args.fire}_2020_ortho.nc', chunks='auto')
+        west_ortho_ds = open_ds(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
+        east_ortho_ds = open_ds(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
 
 
     # composite the two into one
@@ -349,12 +272,12 @@ def main():
         composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
         composite_ds = eval_and_save_nc(
             composite_ds, 
-            save_path=f'temp/{args.fire}_2020_composited.nc',
+            save_path=f'temp/{args.fire}_{args.year}/composited.nc',
             chunks='auto',
-            position='west compositing'
+            desc='west compositing'
         )
     else:
-        composite_ds = open_ds(f'temp/{args.fire}_2020_composited.nc', chunks='auto')
+        composite_ds = open_ds(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
 
 
     # apply smooth edges 
@@ -362,12 +285,12 @@ def main():
         smoothed_ds = smoothing(composite_ds)
         smoothed_ds = eval_and_save_nc(
             smoothed_ds,
-            save_path=f'out/{args.fire}_2020_smoothed.nc',
+            save_path=f'out/{args.fire}_{args.year}_gofer.nc',
             chunks='auto',
-            position='east compositing'
+            desc='east compositing'
         )
     else:
-        smoothed_ds = open_ds(f'out/{args.fire}_2020_smoothed.nc', chunks='auto')
+        smoothed_ds = open_ds(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
 
 
     ''' crack at 50m resampling
@@ -381,7 +304,7 @@ def main():
         ds_50m,
         save_path=f'temp/{args.fire}_2020_downscaled.nc',
         chunks='auto',
-        position='50m downscaling'
+        desc='50m downscaling'
     )
     '''
 
