@@ -28,6 +28,7 @@ group.add_argument('--scale', action='store_true', help='Start from scale')
 group.add_argument('--ortho', action='store_true', help='Start from ortho')
 group.add_argument('--composite', action='store_true', help='Start from composite')
 group.add_argument('--smooth', action='store_true', help='Start from smooth')
+group.add_argument('--final', action='store_true', help='Start from final processing (extra, final steps)')
 parser.add_argument('-f', '--fire', type=str, default='bobcat', help='Name of the fire to ingest')
 parser.add_argument('-y', '--year', type=int, default=2020, help='Year of the fire (to disambiguate fires that may share the same name)')
 args = parser.parse_args()
@@ -38,7 +39,8 @@ pipeline_opts = {
     'scale' : args.scale,
     'ortho' : args.ortho,
     'composite' : args.composite,
-    'smooth' : args.smooth 
+    'smooth' : args.smooth,
+    'final' : args.final
 }
 if True not in set(list(pipeline_opts.values())):
     raise ValueError('Define at least one part of the pipeline to start on.')
@@ -49,6 +51,7 @@ pipeline = [
     'ortho',
     'composite',
     'smooth',
+    'final'
 ]
 run_pipeline = [True] * len(pipeline) 
 for i, action in enumerate(pipeline):
@@ -195,8 +198,8 @@ def main():
     else:
         west_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
         east_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
-        print(west_goes_ds)
-        print(east_goes_ds)
+        #print(west_goes_ds)
+        #print(east_goes_ds)
 
     # scale
     if run_pipeline[2]:
@@ -228,6 +231,8 @@ def main():
     else:
         west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc')
         east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc')
+        #print(west_scaled_ds)
+        #print(east_scaled_ds)
 
     # NOTE we currently only care about the final fire perimeter from here on out
     west_scaled_ds = west_scaled_ds.isel(time=[-1])
@@ -252,7 +257,8 @@ def main():
     else:
         west_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
         east_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
-
+        #print(west_ortho_ds)
+        #print(east_ortho_ds)
 
     # composite the two into one
     if run_pipeline[4]:
@@ -265,6 +271,7 @@ def main():
         )
     else:
         composite_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
+        #print(composite_ds)
 
 
     # apply smooth edges 
@@ -272,14 +279,28 @@ def main():
         smoothed_ds = smoothing(composite_ds)
         smoothed_ds = eval_and_save_nc(
             smoothed_ds,
-            save_path=f'out/{args.fire}_{args.year}_gofer.nc',
+            save_path=f'temp/{args.fire}_{args.year}/smoothed.nc',
             chunks='auto',
-            desc='east compositing'
+            desc='smoothing'
         )
     else:
-        smoothed_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
+        smoothed_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/smoothed.nc', chunks='auto')
+        #print(smoothed_ds)
 
-    smoothed_ds['MaskConfidence'] = smoothed_ds['MaskConfidence'].round(decimals=2)
+    if run_pipeline[6]: # final processing steps that don't really fit cleanly into whole pipeline step 
+        final_ds = smoothed_ds
+        final_ds['MaskConfidence'] = final_ds['MaskConfidence'].round(decimals=2)
+        final_ds['MaskConfidence'] = xr.where(final_ds['MaskConfidence'] < 0.95, 0, 1)
+        final_ds = final_ds.assign_attrs(pipeline='final processing')
+        final_ds = eval_and_save_nc(
+            final_ds,
+            save_path=f'out/{args.fire}_{args.year}_gofer.nc',
+            chunks='auto',
+            desc='final processing (rounding, binarizing confidence)'
+        )
+    else:
+        final_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
+        #print(final_ds)
 
 
     ''' crack at 50m resampling
