@@ -75,18 +75,18 @@ def _get_kernel_dims(da: xr.DataArray, kernel_size: int) -> tuple:
 
 def smooth(
     ds: xr.Dataset,
-    kernel_width_m: int = 1700,
+    kernel_radius_m: int = 1700,
     input_variable: str = "MaskConfidence"
 ) -> xr.Dataset:
     """
-    Smooths a given Dataset variable according to a desired kernel size 
+    Smooths a given Dataset variable according to a desired kernel radius 
     in meters. Smoothing is done by taking the mean of the kernel and 
     assigning it to the center of the kernel.
 
     The effect of this smoothing is mostly on the edges, keeping the body 
     of the structure intact.
     """
-    kernel_size = _kernel_size_from_meters(ds, kernel_width_m)
+    kernel_size = _kernel_size_from_meters(ds, kernel_radius_m * 2)
 
     da = ds[input_variable]
     smoothed_values = uniform_filter(

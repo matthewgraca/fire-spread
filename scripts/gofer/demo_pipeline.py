@@ -109,7 +109,7 @@ def smoothing(ds):
     print(f"Convolving over original raster...", end=" ")
     start_time = time.perf_counter()
 
-    smoothed_ds = smooth(ds, kernel_width_m=1700)
+    smoothed_ds = smooth(ds, kernel_radius_m=1700)
 
     print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     return smoothed_ds
