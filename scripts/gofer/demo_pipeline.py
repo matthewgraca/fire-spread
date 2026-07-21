@@ -279,6 +279,8 @@ def main():
     else:
         smoothed_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
 
+    smoothed_ds['MaskConfidence'] = smoothed_ds['MaskConfidence'].round(decimals=2)
+
 
     ''' crack at 50m resampling
     ds_50m = (smoothed_ds
