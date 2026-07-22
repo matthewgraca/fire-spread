@@ -4,7 +4,6 @@ import xarray as xr
 import numpy as np
 from gofer.spatial_smoothing import smooth
 from gofer.ortho import *
-from tqdm import tqdm
 
 
 def get_scaling_factors(
@@ -39,34 +38,19 @@ def get_scaling_factors(
         ds_t = apply_ortho_map(ds_t, ortho_map, data_var=data_var)
         ds_t = smooth(ds_t, input_variable=data_var)
         s_t = float(np.max(ds_t[data_var].values))
-        '''
-        tqdm.write(
-            f'{t} '
-            f'min: {ds_t[data_var].min().values}, '
-            f'max: {ds_t[data_var].max().values}, '
-            f'mean: {ds_t[data_var].mean().values}, '
-        )
-        tqdm.write(
-            f'{t} '
-            f'min: {np.min(running).item()}, '
-            f'max: {np.max(running).item()}, '
-            f'mean: {np.mean(running).item()}, \n'
-        )
-        '''
         if s_t == 1.0:
             break
         else:
             scaling_factors[i] = s_t
 
-    #tqdm.write(f'Intermediary scaling factors: {scaling_factors}')
-
-    # exceptions: 
-    #   no scalers < 0.1
-    #   0.0 gets set to 1.0 to avoid division by 0
+    # convert scaling factors to 1/sf to they can mulitplied
+    # instead of divided
+    #   acceptable noise: [0.1, 1]; however,
+    #   drop image if below 0.1
     sf = np.array(scaling_factors)
-    sf = np.where(sf < 0.1, 1.0, sf)
-
-    #tqdm.write(f'After cleanup scaling factors: {sf.tolist()}')
+    temp_sf = np.zeros_like(sf, dtype=float)
+    np.divide(1.0, sf, out=temp_sf, where=sf >= 0.1)
+    sf = temp_sf
 
     return sf
 
@@ -81,5 +65,5 @@ def apply_scaling_factors(
         coords={'time': ds['time']},
     ).astype(ds[data_var].dtype)
     return ds.assign(
-        **{data_var : ds[data_var] / early_perimeter_scales_da}
+        **{data_var : ds[data_var] * early_perimeter_scales_da}
     )
