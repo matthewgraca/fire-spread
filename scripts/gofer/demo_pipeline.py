@@ -10,6 +10,7 @@ from gofer.spatial_smoothing import smooth
 from gofer.temporal_downsampler import aggregate
 from gofer.early_perimeter_adjustment import *
 from gofer.goes_utils import eval_and_save_nc
+from gofer.vectorize import raster_to_polygon
 import pickle
 from pathlib import Path
 import time
@@ -283,17 +284,19 @@ def main():
         print(smoothed_ds)
 
     if run_pipeline[6]: # final processing steps that don't really fit cleanly into whole pipeline step 
+        # round, binarize, then vectorize (or polygonize)
         final_ds = smoothed_ds
         final_ds['MaskConfidence'] = final_ds['MaskConfidence'].round(decimals=2)
         final_ds['MaskConfidence'] = xr.where(final_ds['MaskConfidence'] < 0.95, 0, 1)
         final_ds = final_ds.assign_attrs(pipeline='final processing')
-        # TODO raster to polygon
         final_ds = eval_and_save_nc(
             final_ds,
             save_path=f'out/{args.fire}_{args.year}_gofer.nc',
             chunks='auto',
             desc='final processing (rounding, binarizing confidence)'
         )
+        polygons = raster_to_polygon(final_ds, data_var='MaskConfidence', simplify_factor=2.0)
+        print(polygons)
     else:
         print("Loading final dataset...")
         final_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')

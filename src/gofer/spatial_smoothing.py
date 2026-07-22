@@ -8,7 +8,7 @@ from scipy.ndimage import uniform_filter
 import time
 
 
-def _estimate_pixel_size_m(ds: xr.Dataset) -> tuple[float, float]:
+def estimate_pixel_size_m(ds: xr.Dataset) -> tuple[float, float]:
     """
     Since we expect a grid of values, we will need to estimate approximate 
     height and width in meters from latitude/longitude for each pixel
@@ -43,7 +43,7 @@ def _kernel_size_from_meters(ds: xr.Dataset, kernel_width_m: float) -> int:
 
     Convert a desired square kernel width in meters to an odd pixel kernel size.
     """
-    pixel_height_m, pixel_width_m = _estimate_pixel_size_m(ds)
+    pixel_height_m, pixel_width_m = estimate_pixel_size_m(ds)
     nominal_pixel_size_m = np.sqrt(pixel_height_m * pixel_width_m)
 
     kernel_size = int(round(kernel_width_m / nominal_pixel_size_m))
