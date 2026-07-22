@@ -105,7 +105,7 @@ fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs
 #ds_cummax = combined_ds['MaskConfidence'].cumulative('time').max()
 mask_conf = combined_ds['MaskConfidence'].isel(time=-1)
 # plot high-confidence only
-plot = mask_conf.where(mask_conf >= 0.95).plot(ax=axes, **plot_shared_kwargs)
+plot = mask_conf.where(mask_conf).plot(ax=axes, **plot_shared_kwargs)
 
 axes.add_image(tiler, 12)
 axes.set_extent(extent, crs=ccrs.PlateCarree())

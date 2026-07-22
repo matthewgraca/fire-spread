@@ -63,55 +63,44 @@ print('Pipeline active:')
 print([f'{x}: {y}' for x, y in zip(pipeline, run_pipeline)])
 
 def aggregation(goes_save_dir, csv_path, temp_dir, dates, fire_name):
-    print("Opening, remapping, combining, and temporally aligning datasets...", end=" ")
+    print("Opening, remapping, combining, and temporally aligning datasets...")
     start_time = time.perf_counter()
     ds = aggregate(goes_save_dir, csv_path, temp_dir, dates, fire_name=fire_name)
-    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(ds)
     return ds 
 
 
 def remap(goes_ds):
-    print("Remapping mask to confidence values...", end=" ")
-    start_time = time.perf_counter()
+    print("Remapping mask to confidence values...")
     remapped_ds = map_fdc_mask_to_confidence(goes_ds)
-    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(remapped_ds)
     return remapped_ds
 
 def ortho(remapped_ds, dem_filepath, bbox):
-    print("Orthorectifying...", end=" ")
-    start_time = time.perf_counter()
+    print("Orthorectifying...")
     ortho_ds = orthorectify(
         remapped_ds,
         dem_filepath=dem_filepath,
         bbox=bbox,
         data_var="MaskConfidence",
     )
-    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(ortho_ds)
     return ortho_ds
 
 def comp(west_ortho_ds, east_ortho_ds, dates):
-    print("Compositing...", end=" ")
-    start_time = time.perf_counter()
+    print("Compositing...")
     composite_ds = composite(
         west_ortho_ds,
         east_ortho_ds,
         dates,
         data_var='MaskConfidence'
     )
-    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
     print(composite_ds)
     return composite_ds
 
 def smoothing(ds):
-    print(f"Convolving over original raster...", end=" ")
-    start_time = time.perf_counter()
-
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
-
-    print(f"complete. Time elapsed: {(time.perf_counter() - start_time):.1f}")
+    print(smoothed_ds)
     return smoothed_ds
 
 
@@ -143,7 +132,7 @@ def main():
             **fire_bbox
         )
     else:
-        pass
+        print("Skipping ingest...")
 
     with open(f'temp/{args.fire}_{args.year}/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
@@ -159,7 +148,8 @@ def main():
 
         dem_filepath = (
             '/home/mgraca/Workspace/fire-spread/data/dem/'
-            'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
+            #'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
+            'SRTMGL1_NC.003_SRTMGL1_DEM_doy2000042000000_aid0001.tif'
         )
 
 
@@ -196,10 +186,11 @@ def main():
             desc='east aggregation'
         )
     else:
+        print("Loading aggregated east and west datasets...")
         west_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
         east_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
-        #print(west_goes_ds)
-        #print(east_goes_ds)
+        print(west_goes_ds)
+        print(east_goes_ds)
 
     # scale
     if run_pipeline[2]:
@@ -229,10 +220,11 @@ def main():
             desc='east scale factors'
         )
     else:
+        print("Loading early perimeter scaled datasets...")
         west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc')
         east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc')
-        #print(west_scaled_ds)
-        #print(east_scaled_ds)
+        print(west_scaled_ds)
+        print(east_scaled_ds)
 
     # NOTE we currently only care about the final fire perimeter from here on out
     west_scaled_ds = west_scaled_ds.isel(time=[-1])
@@ -255,10 +247,11 @@ def main():
             desc='east orthorectification'
         )
     else:
+        print("Loading orthorectified east and west datasets...")
         west_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
         east_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
-        #print(west_ortho_ds)
-        #print(east_ortho_ds)
+        print(west_ortho_ds)
+        print(east_ortho_ds)
 
     # composite the two into one
     if run_pipeline[4]:
@@ -270,8 +263,9 @@ def main():
             desc='west compositing'
         )
     else:
+        print("Loading composited dataset...")
         composite_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
-        #print(composite_ds)
+        print(composite_ds)
 
 
     # apply smooth edges 
@@ -284,14 +278,16 @@ def main():
             desc='smoothing'
         )
     else:
+        print("Loading smoothed dataset...")
         smoothed_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/smoothed.nc', chunks='auto')
-        #print(smoothed_ds)
+        print(smoothed_ds)
 
     if run_pipeline[6]: # final processing steps that don't really fit cleanly into whole pipeline step 
         final_ds = smoothed_ds
         final_ds['MaskConfidence'] = final_ds['MaskConfidence'].round(decimals=2)
         final_ds['MaskConfidence'] = xr.where(final_ds['MaskConfidence'] < 0.95, 0, 1)
         final_ds = final_ds.assign_attrs(pipeline='final processing')
+        # TODO raster to polygon
         final_ds = eval_and_save_nc(
             final_ds,
             save_path=f'out/{args.fire}_{args.year}_gofer.nc',
@@ -299,24 +295,10 @@ def main():
             desc='final processing (rounding, binarizing confidence)'
         )
     else:
+        print("Loading final dataset...")
         final_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
-        #print(final_ds)
+        print(final_ds)
 
-
-    ''' crack at 50m resampling
-    ds_50m = (smoothed_ds
-        .rio.set_spatial_dims(x_dim='latitude', y_dim='longitude')
-        .rio.write_crs('EPSG:4326')
-        .rio.reproject('EPSG:3310', resolution=50, resampling='nearest')
-        .rio.reproject('EPSG:4326')
-    )
-    ds_50m = eval_and_save_nc(
-        ds_50m,
-        save_path=f'temp/{args.fire}_2020_downscaled.nc',
-        chunks='auto',
-        desc='50m downscaling'
-    )
-    '''
 
     # viz -- sierra nevada orthorectification
     '''
