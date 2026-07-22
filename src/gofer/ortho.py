@@ -10,6 +10,7 @@ from gofer.geometry import lonlat_to_abi_scan_angles
 from gofer.goes_utils import (
     get_projection_params, resolve_data_vars, validate_xy_coords, 
 )
+from gofer.spatial_smoothing import smooth_displacement
 
 
 BBox = tuple[float, float, float, float]
@@ -60,6 +61,7 @@ def make_ortho_map(
     bbox: BBox,
     *,
     parallax_adjustment_factor=0.85,
+    kernel_radius_m: float = 1700,
     include_fixed_grid_diagnostics: bool = True,
 ) -> xr.Dataset:
     """
@@ -77,6 +79,10 @@ def make_ortho_map(
     Parallax adjustment factor determines how much parallax correction should 
     be applied to the given grid. For more information regarding this, see 
     the README.
+
+    The scan-angle indexers are smoothed with a neighborhood mean kernel 
+    to prevent sharp terrain-scale discontinuities from fragmenting the 
+    coarse GOES signal.
     """
     validate_xy_coords(goes_ds)
     params = get_projection_params(goes_ds)
@@ -111,6 +117,17 @@ def make_ortho_map(
 
     abi_x = abi_x_0 + parallax_adjustment_factor * (abi_x_full - abi_x_0)
     abi_y = abi_y_0 + parallax_adjustment_factor * (abi_y_full - abi_y_0)
+
+    # Smooth the scan-angle indexers to match the original GOFER pipeline,
+    # which smooths the displacement vectors before applying them. This 
+    # prevents sharp terrain-scale gradients from fragmenting the coarse 
+    # GOES signal during nearest-neighbor sampling.
+    abi_x, abi_y = smooth_displacement(
+        abi_x, abi_y,
+        lon=dem_da["x"].values,
+        lat=dem_da["y"].values,
+        kernel_radius_m=kernel_radius_m,
+    )
 
     attrs = {
         "orthorectification": "GOES ABI sampled onto EPSG:4326 DEM grid",
@@ -234,6 +251,7 @@ def orthorectify(
     bbox: BBox,
     data_var: str | None = None,
     parallax_adjustment_factor=0.85,
+    kernel_radius_m: float = 1700,
     include_fixed_grid_diagnostics: bool = True,
 ) -> xr.Dataset:
     """
@@ -248,6 +266,7 @@ def orthorectify(
         dem_filepath=dem_filepath,
         bbox=bbox,
         parallax_adjustment_factor=parallax_adjustment_factor,
+        kernel_radius_m=kernel_radius_m,
         include_fixed_grid_diagnostics=include_fixed_grid_diagnostics,
     )
 

@@ -73,6 +73,55 @@ def _get_kernel_dims(da: xr.DataArray, kernel_size: int) -> tuple:
 
     return tuple(size_by_dim[dim] for dim in da.dims)
 
+def smooth_displacement(
+    abi_x: np.ndarray,
+    abi_y: np.ndarray,
+    lon: np.ndarray,
+    lat: np.ndarray,
+    kernel_radius_m: float = 1700,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Smooth the ABI scan-angle displacement arrays with a neighborhood mean.
+
+    In the original GOFER pipeline, the parallax displacement vectors are
+    smoothed with the same spatial kernel before being applied. This prevents
+    sharp terrain-scale discontinuities from fragmenting the coarse GOES signal
+    during orthorectification.
+
+    Args:
+        abi_x: 2D array of ABI x scan angles (radians), shape (lat, lon).
+        abi_y: 2D array of ABI y scan angles (radians), shape (lat, lon).
+        lon: 1D array of longitude values for the grid.
+        lat: 1D array of latitude values for the grid.
+        kernel_radius_m: Radius of the smoothing kernel in meters. The full
+            kernel width is 2 * kernel_radius_m.
+
+    Returns:
+        Tuple of (smoothed_abi_x, smoothed_abi_y).
+    """
+    # Estimate pixel size from the lat/lon grid
+    dlat = abs(np.nanmedian(np.diff(lat)))
+    dlon = abs(np.nanmedian(np.diff(lon)))
+    mean_lat = float(np.nanmean(lat))
+
+    meters_per_degree_lat = 111_320
+    meters_per_degree_lon = 111_320 * np.cos(np.deg2rad(mean_lat))
+
+    pixel_height_m = dlat * meters_per_degree_lat
+    pixel_width_m = dlon * meters_per_degree_lon
+    nominal_pixel_size_m = np.sqrt(pixel_height_m * pixel_width_m)
+
+    kernel_size = int(round((kernel_radius_m * 2) / nominal_pixel_size_m))
+    kernel_size = max(kernel_size, 1)
+    if kernel_size % 2 == 0:
+        kernel_size += 1
+
+    smoothed_x = uniform_filter(abi_x, size=kernel_size, mode="nearest")
+    smoothed_y = uniform_filter(abi_y, size=kernel_size, mode="nearest")
+
+    return smoothed_x, smoothed_y
+
+
 def smooth(
     ds: xr.Dataset,
     kernel_radius_m: int = 1700,
