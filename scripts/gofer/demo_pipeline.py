@@ -11,6 +11,7 @@ from gofer.temporal_downsampler import aggregate
 from gofer.early_perimeter_adjustment import *
 from gofer.goes_utils import eval_and_save_nc
 from gofer.vectorize import raster_to_polygon
+from gofer.postprocess import binarize, round_to, trim_inactive_timesteps
 import pickle
 from pathlib import Path
 import time
@@ -149,8 +150,8 @@ def main():
 
         dem_filepath = (
             '/home/mgraca/Workspace/fire-spread/data/dem/'
-            #'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
-            'SRTMGL1_NC.003_SRTMGL1_DEM_doy2000042000000_aid0001.tif'
+            'SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif'
+            #'SRTMGL1_NC.003_SRTMGL1_DEM_doy2000042000000_aid0001.tif'
         )
 
 
@@ -200,6 +201,7 @@ def main():
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         west_scaled_ds = apply_scaling_factors(west_goes_ds, west_sf)
+        west_goes_ds.close()
         west_scaled_ds = eval_and_save_nc(
             west_scaled_ds,
             chunk_size=(1, 1500, 2500),
@@ -213,6 +215,7 @@ def main():
             ortho_kwargs={'dem_filepath' : dem_filepath, 'bbox': bbox}
         )
         east_scaled_ds = apply_scaling_factors(east_goes_ds, east_sf)
+        east_goes_ds.close()
         east_scaled_ds = eval_and_save_nc(
             east_scaled_ds,
             chunk_size=(1, 1500, 2500),
@@ -222,18 +225,26 @@ def main():
         )
     else:
         print("Loading early perimeter scaled datasets...")
-        west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc')
-        east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc')
+        west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc', chunks='auto')
+        east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc', chunks='auto')
         print(west_scaled_ds)
         print(east_scaled_ds)
 
+    '''
     # NOTE we currently only care about the final fire perimeter from here on out
     west_scaled_ds = west_scaled_ds.isel(time=[-1])
     east_scaled_ds = east_scaled_ds.isel(time=[-1])
+    '''
+    '''
+    # grab every 12
+    west_scaled_ds = west_scaled_ds.isel(time=slice(None, None, 12))
+    east_scaled_ds = east_scaled_ds.isel(time=slice(None, None, 12))
+    '''
 
     # ortho
     if run_pipeline[3]:
         west_ortho_ds = ortho(west_scaled_ds, dem_filepath, bbox)
+        west_scaled_ds.close()
         west_ortho_ds = eval_and_save_nc(
             west_ortho_ds,
             save_path=f'temp/{args.fire}_{args.year}/west/ortho.nc',
@@ -241,6 +252,7 @@ def main():
             desc='west orthorectification'
         )
         east_ortho_ds = ortho(east_scaled_ds, dem_filepath, bbox)
+        east_scaled_ds.close()
         east_ortho_ds = eval_and_save_nc(
             east_ortho_ds,
             save_path=f'temp/{args.fire}_{args.year}/east/ortho.nc',
@@ -257,6 +269,8 @@ def main():
     # composite the two into one
     if run_pipeline[4]:
         composite_ds = comp(west_ortho_ds, east_ortho_ds, dates)
+        west_ortho_ds.close()
+        east_ortho_ds.close()
         composite_ds = eval_and_save_nc(
             composite_ds, 
             save_path=f'temp/{args.fire}_{args.year}/composited.nc',
@@ -272,6 +286,7 @@ def main():
     # apply smooth edges 
     if run_pipeline[5]:
         smoothed_ds = smoothing(composite_ds)
+        composite_ds.close()
         smoothed_ds = eval_and_save_nc(
             smoothed_ds,
             save_path=f'temp/{args.fire}_{args.year}/smoothed.nc',
@@ -286,15 +301,17 @@ def main():
     if run_pipeline[6]: # final processing steps that don't really fit cleanly into whole pipeline step 
         # round, binarize, then vectorize (or polygonize)
         final_ds = smoothed_ds
-        final_ds['MaskConfidence'] = final_ds['MaskConfidence'].round(decimals=2)
-        final_ds['MaskConfidence'] = xr.where(final_ds['MaskConfidence'] < 0.95, 0, 1)
+        final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
+        final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
+        final_ds = trim_inactive_timesteps(final_ds, data_var='MaskConfidence')
         final_ds = final_ds.assign_attrs(pipeline='final processing')
         final_ds = eval_and_save_nc(
             final_ds,
             save_path=f'out/{args.fire}_{args.year}_gofer.nc',
             chunks='auto',
-            desc='final processing (rounding, binarizing confidence)'
+            desc='final processing (rounding, binarizing confidence, trimming)'
         )
+        print(final_ds)
         polygons = raster_to_polygon(final_ds, data_var='MaskConfidence', simplify_factor=2.0)
         print(polygons)
     else:
