@@ -21,6 +21,7 @@ import numpy as np
 import sys
 from argparse import ArgumentParser
 import rioxarray
+import shutil
 
 parser = ArgumentParser(description='GOFER pipeline')
 group = parser.add_mutually_exclusive_group()
@@ -33,6 +34,7 @@ group.add_argument('--smooth', action='store_true', help='Start from smooth')
 group.add_argument('--final', action='store_true', help='Start from final processing (extra, final steps)')
 parser.add_argument('-f', '--fire', type=str, default='bobcat', help='Name of the fire to ingest')
 parser.add_argument('-y', '--year', type=int, default=2020, help='Year of the fire (to disambiguate fires that may share the same name)')
+parser.add_argument('-c', '--clean', action='store_true', help='Deletes all netcdf temp files')
 args = parser.parse_args()
 
 pipeline_opts = {
@@ -78,6 +80,7 @@ def remap(goes_ds):
     print(remapped_ds)
     return remapped_ds
 
+
 def ortho(remapped_ds, dem_filepath, bbox):
     print("Orthorectifying...")
     ortho_ds = orthorectify(
@@ -88,6 +91,7 @@ def ortho(remapped_ds, dem_filepath, bbox):
     )
     print(ortho_ds)
     return ortho_ds
+
 
 def comp(west_ortho_ds, east_ortho_ds, dates):
     print("Compositing...")
@@ -100,6 +104,7 @@ def comp(west_ortho_ds, east_ortho_ds, dates):
     print(composite_ds)
     return composite_ds
 
+
 def smoothing(ds):
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
     print(smoothed_ds)
@@ -107,6 +112,10 @@ def smoothing(ds):
 
 
 def main():
+    # high-level temp dir (metadata)
+    temp_dir = f'temp/{args.fire}_{args.year}'
+    netcdf_temp_dir = f'{temp_dir}/netcdf'
+
     if run_pipeline[0]:
         calfire_geojson_path = "data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
         gdf = read_calfire_geojson(calfire_geojson_path)
@@ -129,14 +138,14 @@ def main():
         download(
             **fire_attrs,
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            metadata_save_dir=f'temp/{args.fire}_{args.year}',
+            metadata_save_dir=temp_dir,
             subhourly=True,
             **fire_bbox
         )
     else:
         print("Skipping ingest...")
 
-    with open(f'temp/{args.fire}_{args.year}/metadata.pkl', 'rb') as f:
+    with open(f'{temp_dir}/metadata.pkl', 'rb') as f:
         data = pickle.load(f)
         dates = data['dates']
 
@@ -160,37 +169,37 @@ def main():
     if run_pipeline[1]:
         west_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}_{args.year}/west_files.csv',
-            temp_dir=f'temp/{args.fire}_{args.year}/west/hourly',
+            csv_path=f'/home/mgraca/Workspace/fire-spread/{temp_dir}/west_files.csv',
+            temp_dir=f'{netcdf_temp_dir}/west/hourly',
             dates=dates,
             fire_name=args.fire.upper()
         )
         west_goes_ds = eval_and_save_nc(
             west_goes_ds, 
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/{args.fire}_{args.year}/west/aggregated.nc',
+            save_path=f'{netcdf_temp_dir}/west/aggregated.nc',
             chunks='auto',
             desc='west aggregation'
         )
 
         east_goes_ds = aggregation(
             goes_save_dir='/home/mgraca/Workspace/fire-spread/data/goes',
-            csv_path=f'/home/mgraca/Workspace/fire-spread/temp/{args.fire}_{args.year}/east_files.csv',
-            temp_dir=f'temp/{args.fire}_{args.year}/east/hourly',
+            csv_path=f'/home/mgraca/Workspace/fire-spread/{temp_dir}/east_files.csv',
+            temp_dir=f'{netcdf_temp_dir}/east/hourly',
             dates=dates,
             fire_name=args.fire.upper()
         )
         east_goes_ds = eval_and_save_nc(
             east_goes_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/{args.fire}_{args.year}/east/aggregated.nc',
+            save_path=f'{netcdf_temp_dir}/east/aggregated.nc',
             chunks='auto',
             desc='east aggregation'
         )
     else:
         print("Loading aggregated east and west datasets...")
-        west_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/aggregated.nc', chunks='auto')
-        east_goes_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/aggregated.nc', chunks='auto')
+        west_goes_ds = xr.open_dataset(f'{netcdf_temp_dir}/west/aggregated.nc', chunks='auto')
+        east_goes_ds = xr.open_dataset(f'{netcdf_temp_dir}/east/aggregated.nc', chunks='auto')
         print(west_goes_ds)
         print(east_goes_ds)
 
@@ -205,7 +214,7 @@ def main():
         west_scaled_ds = eval_and_save_nc(
             west_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/{args.fire}_{args.year}/west/scaled.nc',
+            save_path=f'{netcdf_temp_dir}/west/scaled.nc',
             chunks={'time': 1},
             desc='west scale factors'
         )
@@ -219,14 +228,14 @@ def main():
         east_scaled_ds = eval_and_save_nc(
             east_scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=f'temp/{args.fire}_{args.year}/east/scaled.nc',
+            save_path=f'{netcdf_temp_dir}/east/scaled.nc',
             chunks={'time': 1},
             desc='east scale factors'
         )
     else:
         print("Loading early perimeter scaled datasets...")
-        west_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/scaled.nc', chunks='auto')
-        east_scaled_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/scaled.nc', chunks='auto')
+        west_scaled_ds = xr.open_dataset(f'{netcdf_temp_dir}/west/scaled.nc', chunks='auto')
+        east_scaled_ds = xr.open_dataset(f'{netcdf_temp_dir}/east/scaled.nc', chunks='auto')
         print(west_scaled_ds)
         print(east_scaled_ds)
 
@@ -247,7 +256,7 @@ def main():
         west_scaled_ds.close()
         west_ortho_ds = eval_and_save_nc(
             west_ortho_ds,
-            save_path=f'temp/{args.fire}_{args.year}/west/ortho.nc',
+            save_path=f'{netcdf_temp_dir}/west/ortho.nc',
             chunks='auto',
             desc='west orthorectification'
         )
@@ -255,14 +264,14 @@ def main():
         east_scaled_ds.close()
         east_ortho_ds = eval_and_save_nc(
             east_ortho_ds,
-            save_path=f'temp/{args.fire}_{args.year}/east/ortho.nc',
+            save_path=f'{netcdf_temp_dir}/east/ortho.nc',
             chunks='auto',
             desc='east orthorectification'
         )
     else:
         print("Loading orthorectified east and west datasets...")
-        west_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/west/ortho.nc', chunks='auto')
-        east_ortho_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/east/ortho.nc', chunks='auto')
+        west_ortho_ds = xr.open_dataset(f'{netcdf_temp_dir}/west/ortho.nc', chunks='auto')
+        east_ortho_ds = xr.open_dataset(f'{netcdf_temp_dir}/east/ortho.nc', chunks='auto')
         print(west_ortho_ds)
         print(east_ortho_ds)
 
@@ -273,13 +282,13 @@ def main():
         east_ortho_ds.close()
         composite_ds = eval_and_save_nc(
             composite_ds, 
-            save_path=f'temp/{args.fire}_{args.year}/composited.nc',
+            save_path=f'{netcdf_temp_dir}/composited.nc',
             chunks='auto',
             desc='west compositing'
         )
     else:
         print("Loading composited dataset...")
-        composite_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/composited.nc', chunks='auto')
+        composite_ds = xr.open_dataset(f'{netcdf_temp_dir}/composited.nc', chunks='auto')
         print(composite_ds)
 
 
@@ -289,13 +298,13 @@ def main():
         composite_ds.close()
         smoothed_ds = eval_and_save_nc(
             smoothed_ds,
-            save_path=f'temp/{args.fire}_{args.year}/smoothed.nc',
+            save_path=f'{netcdf_temp_dir}/smoothed.nc',
             chunks='auto',
             desc='smoothing'
         )
     else:
         print("Loading smoothed dataset...")
-        smoothed_ds = xr.open_dataset(f'temp/{args.fire}_{args.year}/smoothed.nc', chunks='auto')
+        smoothed_ds = xr.open_dataset(f'{netcdf_temp_dir}/smoothed.nc', chunks='auto')
         print(smoothed_ds)
 
     if run_pipeline[6]: # final processing steps that don't really fit cleanly into whole pipeline step 
@@ -319,6 +328,8 @@ def main():
         final_ds = xr.open_dataset(f'out/{args.fire}_{args.year}_gofer.nc', chunks='auto')
         print(final_ds)
 
+    if args.clean:
+        shutil.rmtree(netcdf_temp_dir)
 
     # viz -- sierra nevada orthorectification
     '''
