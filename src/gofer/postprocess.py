@@ -33,7 +33,8 @@ def trim_inactive_timesteps(
     # from the one before it
     last_change = len(da.time) - 1
     for t in range(len(da.time) - 1, 0, -1):
-        if not da.isel(time=t).equals(da.isel(time=t - 1)):
+        diff = (da.isel(time=t) != da.isel(time=t - 1)).any().compute()
+        if diff:
             last_change = t
             break
 

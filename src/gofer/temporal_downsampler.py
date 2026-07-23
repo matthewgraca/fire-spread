@@ -44,8 +44,8 @@ def _prune_invalid_and_pad_missing_timesteps(
 ) -> xr.Dataset:
     '''
     Due to improper storage on GOES's end, there may be some invalid timesteps.
-    We prune those improper timesteps, and fill out the data of any timesteps 
-    that are missing with zeros.
+    We prune those improper timesteps, and fill out the data of any timesteps
+    that are missing with NaN (to be resolved downstream by the caller).
     '''
     # prune invalid timesteps due to improper storage on goes's end
     target_time = xr.DataArray(dates.tz_localize(None), dims="time", name="time")
@@ -54,7 +54,7 @@ def _prune_invalid_and_pad_missing_timesteps(
         .sel(time=valid_dates)
         .reindex(
             time=target_time,
-            fill_value={data_var: np.float16(0)}
+            fill_value={data_var: np.nan}
         )
     )
 
@@ -118,6 +118,9 @@ def _clean_ds(
         'active_fire', 'fire_perimeter', 'fire_name'
     }
 ) -> xr.Dataset:
+    """
+    Removes a ton of coords and attributes we'll no longer need.
+    """
     ds_clean = ds.copy()
     remove_coords = [
         coord for coord in ds_clean.coords
@@ -151,19 +154,14 @@ def aggregate(
     is_perimeter: bool = True
 ) -> xr.Dataset:
     '''
-    Temporally downsample a dataset according to a given list of dates.
+    Pipeline:
+        1. Remamp -- Maps FDC Mask data to confidence values
+        2. Temporal downsample -- gathers all subhourly observations and 
+            groups them into hourly observations
+        3. Imputation -- any gaps in the data are filled to ensure a 
+            temporally resolved dataset
 
-    Any empty gaps in timestep (due to corrupted timestep or satellite gaps) 
-    will be filled with zeros.
-
-    For example, given a DataFrame of subhourly dates, the method will 
-    then combine these subhourly dates into the hour according to max 
-    on time.
-
-    Aggregates subhourly data into hourly resolution by downsampling 5-minute 
-    GOES data into hourly data by max confidence.
-
-    A bit of an overloaded function in terms of seperation of duties, no?
+    To prevent maxing out on RAM, each frame is saved into an nc file.
 
     Args:
         goes_save_dir (str): The directory pointing to the location of the 
@@ -232,6 +230,14 @@ def aggregate(
     )
 
     ds = _prune_invalid_and_pad_missing_timesteps(ds, dates, data_var)
+
+    # ffill gaps for fire perimeter (to respect cummax)
+    # impute with 0 for active fire
+    if is_perimeter:
+        ds[data_var] = ds[data_var].ffill(dim='time')
+    else:
+        ds[data_var] = ds[data_var].fillna(0)
+
     ds = ds.chunk({'time' : 1})
 
     return ds
