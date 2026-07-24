@@ -97,3 +97,10 @@ The authors determined that these kernel sizes worked best for their large Calif
 - GOES-East: 3.1–3.6 km
 - GOES-West: 2.5–2.7 km
 - GOES-Combined: 1.6–1.7 km
+
+# Vectorize
+These methods are responsible for converting our raster into polygons. If the goal is to have a numpy file to train against, then this isn't necessary. For plotting purposes, this is nice so we also implement this.
+
+The GOFER algorithm follows Google and applies a 1:2 margin of error for the vectors. That is, if the product is at a 50m resolution, the polygons drawn will have a 100m margin of error.
+
+For us, we currently use a 90m DEM, so our polygons will have a 180m margin of error. We're not too pressed about this since the error bar for GOFER-Combined is 750m±210m, and the GOES images themselves are 2000m x 2000m.
