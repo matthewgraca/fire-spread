@@ -272,7 +272,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             temp_dir=str(Path(netcdf_dir) / sat / 'hourly'),
             dates=dates,
             fire_name=fire_name,
-            verbose=False,
+            verbose=True,
         )
         ds = eval_and_save_nc(
             ds,
@@ -280,7 +280,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             save_path=str(Path(netcdf_dir) / sat / 'aggregated.nc'),
             chunks='auto',
             desc=f'{sat} aggregation',
-            verbose=False,
+            verbose=True,
         )
         results[sat] = ds
     return results['west'], results['east']
@@ -294,7 +294,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         sf = get_scaling_factors(
             ds,
             ortho_kwargs={'dem_filepath': dem_filepath, 'bbox': bbox},
-            show_progress=False,
+            show_progress=True,
         )
         scaled_ds = apply_scaling_factors(ds, sf)
         ds.close()
@@ -304,7 +304,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             save_path=str(Path(netcdf_dir) / sat / 'scaled.nc'),
             chunks={'time': 1},
             desc=f'{sat} scaling',
-            verbose=False,
+            verbose=True,
         )
         results[sat] = scaled_ds
     return results['west'], results['east']
@@ -327,7 +327,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             save_path=str(Path(netcdf_dir) / sat / 'ortho.nc'),
             chunks='auto',
             desc=f'{sat} orthorectification',
-            verbose=False,
+            verbose=True,
         )
         results[sat] = ortho_ds
     return results['west'], results['east']
@@ -344,7 +344,7 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
         save_path=str(Path(netcdf_dir) / 'composited.nc'),
         chunks='auto',
         desc='compositing',
-        verbose=False,
+        verbose=True,
     )
     return composite_ds
 
@@ -359,7 +359,7 @@ def step_smooth(ds, netcdf_dir: str):
         save_path=str(Path(netcdf_dir) / 'smoothed.nc'),
         chunks='auto',
         desc='smoothing',
-        verbose=False,
+        verbose=True,
     )
     return smoothed_ds
 
@@ -409,7 +409,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         save_path=nc_path,
         chunks='auto',
         desc='final processing',
-        verbose=False,
+        verbose=True,
     )
     tqdm.write(f"      Saved: {nc_path}")
 
