@@ -1,143 +1,161 @@
-import xarray as xr
+"""
+Fire perimeter visualization.
+
+Plots GOFER polygon perimeters with optional CalFire reference overlay
+on a streetmap basemap.
+"""
 import geopandas as gpd
-import pandas as pd
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-import pickle
-from tqdm import tqdm
+from matplotlib.colors import LinearSegmentedColormap
+
 from viz.gofer.tilers import CartoDBTiles
 
-with open('temp/bobcat_2020/metadata.pkl', 'rb') as f:
-    goes_files = pickle.load(f)
-    dates = goes_files['dates']
-    buffer = 0.1
-    bbox = (
-        goes_files['lon_min'] - buffer,
-        goes_files['lat_min'] - buffer,
-        goes_files['lon_max'] + buffer,
-        goes_files['lat_max'] + buffer
-    )
-    extent = [
-        goes_files['lon_min'] - buffer,
-        goes_files['lon_max'] + buffer,
-        goes_files['lat_min'] - buffer,
-        goes_files['lat_max'] + buffer
-    ]
 
-combined_ds = xr.open_dataset('out/bobcat_2020_gofer.nc', chunks='auto')
-print(combined_ds)
+def plot_perimeter(
+    gofer_gdf: gpd.GeoDataFrame,
+    ds: xr.Dataset = None,
+    calfire_gdf: gpd.GeoDataFrame = None,
+    extent: list = None,
+    title: str = "GOFER Fire Perimeter",
+    save_path: str = None,
+    data_var: str = "MaskConfidence",
+):
+    """
+    Plot GOFER polygon(s) with optional CalFire reference overlay on a
+    streetmap basemap.
 
-plot_shared_kwargs = {
-    'transform' : ccrs.PlateCarree(),
-    'cmap' : 'YlOrRd',
-    'vmin' : 0.0,
-    'vmax' : 1.0,
-    'add_colorbar' : False
-}
+    If the GeoDataFrame has a 'time' column (multi-timestep), perimeters are
+    colored from blue (early) to red (late), with early perimeters drawn on
+    top so they are not obscured by later, larger perimeters.
 
-#print(combined_ds["time"])
-'''
-time_start = combined_ds["time"].coarsen(time=12, boundary="trim").min()
-time_end = combined_ds["time"].coarsen(time=12, boundary="trim").max()
-# groups into non-overlapping 12 frame chunks
-# same, but a cumulative max
-ds = (
-    combined_ds.coarsen(time=12, boundary='trim')
-    .max()
-    .cumulative(dim='time')
-    .max()
-)
-ds = ds.assign_coords(
-    time_start=("time", time_start.data),
-    time_end=("time", time_end.data),
-)
-'''
-#print(ds)
+    Color is normalized to the timestep at which the fire reaches 95% of its
+    final burned area, matching the paper's visualization scheme.
 
-gdf = gpd.read_file("data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson")
-bobcat_fire = gdf.loc[gdf['FIRE_NAME'] == 'BOBCAT']
-
-''' full
-for i, d in tqdm(enumerate(ds['time'].values)):
+    Args:
+        gofer_gdf: GeoDataFrame from raster_to_polygon.
+        ds: The source xarray Dataset, used to compute 95% area normalization.
+        calfire_gdf: Optional CalFire reference perimeter GeoDataFrame.
+        extent: [lon_min, lon_max, lat_min, lat_max] for the plot.
+        title: Plot title.
+        save_path: If provided, save the figure to this path.
+        data_var: Name of the binary fire variable in ds.
+    """
     tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
-    fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
-
-    mask_conf = ds["MaskConfidence"].isel(time=i)
-    plot = mask_conf.where(mask_conf != 0).plot(ax=axes, **plot_shared_kwargs)
-
-    axes.add_image(tiler, 12)
-    axes.set_extent(extent, crs=ccrs.PlateCarree())
-    bobcat_fire.to_crs(epsg=4326).plot(
-        ax=axes,
-        transform=ccrs.PlateCarree(),
-        facecolor='none',
-        edgecolor='black'
+    fig, ax = plt.subplots(
+        1, 1, figsize=(16, 12),
+        subplot_kw={'projection': ccrs.PlateCarree()},
+        layout='constrained'
     )
 
-    cbar = fig.colorbar(
-        plot,
-        ax=axes,
-        orientation='vertical',
-        shrink=0.7,
-        pad=0.03
-    )
+    # Streetmap basemap
+    ax.add_image(tiler, 12)
 
-    cbar.set_label("Fire Confidence")
+    if extent is not None:
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
 
-    dt_start = pd.to_datetime(mask_conf['time_start'].item())
-    dt_end = pd.to_datetime(mask_conf['time_end'].item())
+    # Plot CalFire reference if provided (underneath everything)
+    if calfire_gdf is not None:
+        calfire_gdf.to_crs(epsg=4326).plot(
+            ax=ax,
+            transform=ccrs.PlateCarree(),
+            facecolor='black',
+            edgecolor='black',
+            linewidth=2,
+            label='CalFire',
+            zorder=3,
+        )
 
-    axes.set_title(
-        f"GOFER \n"
-        f"start: {dt_start}\n"
-        f"end: {dt_end}"
-    )
+    # Plot GOFER polygon(s)
+    has_time = 'time' in gofer_gdf.columns
 
-    plt.savefig(f"out/gofer/{dt_end.strftime('%Y-%m-%dT%H:%M:%S')}.png")
+    if has_time and len(gofer_gdf) > 1:
+        n = len(gofer_gdf)
+        # Custom colormap matching the GOFER paper's SpectralFancy palette
+        colors = [
+            (0.00, "#3089B4"),  # blue
+            (0.10, "#59AAB2"),  # blue-cyan
+            (0.20, "#92CCA9"),  # blue-green
+            (0.30, "#BCE1AA"),  # light green
+            (0.40, "#DCF4B7"),  # pale yellow-green
+            (0.50, "#F7F3B3"),  # pale yellow
+            (0.60, "#FDDD95"),  # light orange
+            (0.70, "#FEBB73"),  # orange
+            (0.80, "#F48E4F"),  # orange-red
+            (0.90, "#EA5236"),  # red-orange
+            (1.00, "#D7131A"),  # red
+        ]
+        cmap = LinearSegmentedColormap.from_list("fire_time", colors, N=256)
+        cmap.set_over("#D91D1E")
+
+        # Normalize color to 95% of final burned area
+        if ds is not None and data_var in ds:
+            fire_area = ds[data_var].sum(dim=['latitude', 'longitude'])
+            final_area = float(fire_area.isel(time=-1))
+            t95_idx = int((fire_area >= 0.95 * final_area).argmax(dim='time'))
+            t95_idx = max(t95_idx, 1)  # avoid division by zero
+        else:
+            t95_idx = n - 1
+
+        # If no calfire reference, draw the latest perimeter as a black background
+        if calfire_gdf is None:
+            gpd.GeoDataFrame([gofer_gdf.iloc[-1]], crs="EPSG:4326").plot(
+                ax=ax,
+                transform=ccrs.PlateCarree(),
+                facecolor='black',
+                edgecolor='black',
+                alpha=1.0,
+                linewidth=1.5,
+                zorder=3,
+            )
+
+        # Draw late (large) perimeters first so early (small) ones sit on top
+        for idx in reversed(range(n)):
+            row = gofer_gdf.iloc[idx]
+            frac = min(idx / t95_idx, 1.0)  # normalized to 95% area
+            color = cmap(frac)
+            gpd.GeoDataFrame([row], crs="EPSG:4326").plot(
+                ax=ax,
+                transform=ccrs.PlateCarree(),
+                facecolor=color if calfire_gdf is not None else 'none',
+                edgecolor=color,
+                alpha=0.01 if calfire_gdf is not None else 0.8,
+                linewidth=1.0,
+                zorder=4 + (n - idx),  # earlier = higher zorder
+            )
+
+        # Colorbar
+        norm = mcolors.Normalize(vmin=0, vmax=1)
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, orientation='vertical', shrink=0.7, pad=0.03)
+
+        cbar.set_ticks([0, 0.25, 0.5, 0.75, 1.0])
+        cbar.set_ticklabels(['0%', '25%', '50%', '75%', '95%+'])
+        cbar.set_label("% of hours elapsed relative to 95% burned area")
+    else:
+        # Single polygon
+        gofer_gdf.plot(
+            ax=ax,
+            transform=ccrs.PlateCarree(),
+            facecolor='red',
+            edgecolor='red',
+            alpha=0.35,
+            linewidth=1.5,
+            label='GOFER',
+            zorder=4,
+        )
+
+    ax.set_title(title)
+    if calfire_gdf is not None:
+        ax.legend(loc='upper right')
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Saved to {save_path}")
+
     plt.close()
-'''
-''' just final '''
-tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
-fig, axes = plt.subplots(1, 1, figsize=(16, 12), subplot_kw={'projection' : ccrs.PlateCarree()}, layout='constrained')
-
-# cummax over whole ds
-#ds_cummax = combined_ds['MaskConfidence'].cumulative('time').max()
-mask_conf = combined_ds['MaskConfidence'].isel(time=-1)
-# plot high-confidence only
-plot = mask_conf.where(mask_conf).plot(ax=axes, **plot_shared_kwargs)
-
-axes.add_image(tiler, 12)
-axes.set_extent(extent, crs=ccrs.PlateCarree())
-bobcat_fire.to_crs(epsg=4326).plot(
-    ax=axes,
-    transform=ccrs.PlateCarree(),
-    facecolor='none',
-    edgecolor='black'
-)
-
-cbar = fig.colorbar(
-    plot,
-    ax=axes,
-    orientation='vertical',
-    shrink=0.7,
-    pad=0.03
-)
-
-cbar.set_label("Fire Confidence")
-
-'''
-dt_start = pd.to_datetime(mask_conf['time'].item())
-dt_end = pd.to_datetime(mask_conf['time_end'].item())
-
-axes.set_title(
-    f"GOFER \n"
-    f"start: {dt_start}\n"
-    f"end: {dt_end}"
-)
-
-plt.savefig(f"out/gofer/{dt_end.strftime('%Y-%m-%dT%H:%M:%S')}.png")
-'''
-axes.set_title(f"GOFER")
-plt.savefig(f"out/gofer/bobcat.png")
-plt.close()
