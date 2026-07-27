@@ -1,25 +1,3 @@
-# Usage
-Inventory
-- `ingest.py` -- Runs ingestion
-- `run_pipeline.py` -- Runs the rest of the pipeline
-
-Usage:
-```bash
-python scripts/gofer/ingest.py \
-    --manifest "$MANIFEST" \
-    --goes-dir "$GOES_DIR" \
-    --temp-dir "$TEMP_DIR"
-
-python scripts/gofer/run_pipeline.py \
-    --manifest "$MANIFEST" \
-    --step "$START_STEP" \
-    --goes-dir "$GOES_DIR" \
-    --temp-dir "$TEMP_DIR" \
-    --out-dir "$OUT_DIR" \
-    --dem "$DEM" \
-    --clean
-```
-
 # Flow
 ```mermaid
 flowchart TD
@@ -29,7 +7,7 @@ flowchart TD
     DEM[("data/dem/SRTMGL3_NC.003_SRTMGL3_DEM.tif")]
 
     %% ===== PHASE 1: INGEST =====
-    subgraph INGEST["Phase 1: Ingest (ingest.py)"]
+    subgraph INGEST["Phase 1: Ingest"]
         direction TB
         I["Lookup fire in CalFire"]
         DL["Download GOES-East + West<br/>subhourly FDC product"]
@@ -43,7 +21,7 @@ flowchart TD
     DL --> META[("temp/bobcat_2020/<br/>metadata.pkl<br/>west_files.csv<br/>east_files.csv")]
 
     %% ===== PHASE 2: PROCESS =====
-    subgraph PROCESS["Phase 2: Process (run_pipeline.py --step aggregate)"]
+    subgraph PROCESS["Phase 2: Process"]
         direction TB
         
         AGG["[1/6] Aggregate<br/>remap mask→confidence → max/hour → cummax → ffill gaps"]
