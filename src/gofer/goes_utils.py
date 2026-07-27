@@ -1,10 +1,68 @@
 from __future__ import annotations
 import xarray as xr
 import numpy as np
+import pandas as pd
 from pathlib import Path
 from tqdm.dask import TqdmCallback
 
 GRS80_ECCENTRICITY = 0.0818191910435
+
+# Operational date ranges for each GOES satellite on AWS S3.
+# Each entry maps a bucket name to (position, start_date, end_date).
+# end_date of None means the satellite is still active.
+_SATELLITE_AVAILABILITY = [
+    ("noaa-goes16", "EAST", pd.Timestamp("2017-07-10"), pd.Timestamp("2025-04-04")),
+    ("noaa-goes17", "WEST", pd.Timestamp("2018-11-01"), pd.Timestamp("2023-01-10")),
+    ("noaa-goes18", "WEST", pd.Timestamp("2022-07-01"), None),
+    ("noaa-goes19", "EAST", pd.Timestamp("2025-04-04"), None),
+]
+
+
+def get_satellite(position: str, date: pd.Timestamp) -> str:
+    """
+    Select the appropriate GOES satellite bucket for a given position and date.
+
+    Parameters
+    ----------
+    position : str
+        Either "WEST" or "EAST".
+    date : pd.Timestamp
+        The date for which data is needed.
+
+    Returns
+    -------
+    str
+        The S3 bucket name (e.g., "noaa-goes18").
+
+    Raises
+    ------
+    ValueError
+        If position is invalid or no satellite covers the given date/position.
+    """
+    position = position.upper()
+    if position not in ("WEST", "EAST"):
+        raise ValueError(f"position must be 'WEST' or 'EAST', got '{position}'")
+
+    # Find all satellites covering this position and date, prefer the newest.
+    candidates = []
+    for bucket, pos, start, end in _SATELLITE_AVAILABILITY:
+        if pos != position:
+            continue
+        if date < start:
+            continue
+        if end is not None and date >= end:
+            continue
+        candidates.append((bucket, start))
+
+    if not candidates:
+        raise ValueError(
+            f"No GOES satellite available for position='{position}' on {date.date()}"
+        )
+
+    # Return the satellite with the latest start date (newest operational sat).
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[0][0]
+
 
 def get_projection_params(goes_ds: xr.Dataset) -> dict[str, float]:
     """

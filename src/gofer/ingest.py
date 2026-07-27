@@ -8,6 +8,8 @@ import contextlib
 import io
 import traceback
 
+from gofer.goes_utils import get_satellite
+
 #### multi-row operations; returns new dataframe
 def _add_fire_centroids(gdf: gpd.GeoDataFrame):
     '''
@@ -144,12 +146,20 @@ def ingest(date, subhourly, satellite, product, domain, save_dir, verbose, silen
                 g = _goes2go_ingest(subhourly, date, goes2go_kwargs)
         # Missing on AWS's end
         except FileNotFoundError as e:
-            tqdm.write(f'Data for {date} missing for GOES-{satellite}.')
+            tqdm.write(f'Data for {date} missing for {satellite}.')
             error_hit = True
         except KeyboardInterrupt:
             raise
         except:
-            tqdm.write(f'Data for {date} missing/corrupted for GOES-{satellite}.')
+            # GOES-17 had a faulty cooling system that caused infrared detector 
+            # overheating around local midnight
+            if satellite == 'noaa-goes17' and 6 <= date.hour <= 12:
+                tqdm.write(
+                    f'Data for {date} missing/corrupted for {satellite}, '
+                    f'likely due to known G17 infrared detector overheating issue.'
+                )
+            else:
+                tqdm.write(f'Data for {date} missing/corrupted for {satellite}.')
             error_hit = True
     else:
         g = _goes2go_ingest(subhourly, date, goes2go_kwargs)
@@ -182,11 +192,13 @@ def download(
     for d in (pbar := tqdm(ingest_dates.tz_localize(None))):
         pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
 
-        east_file_df = ingest(d, satellite='EAST', **goes_kwargs)
+        east_sat = get_satellite('EAST', d)
+        east_file_df = ingest(d, satellite=east_sat, **goes_kwargs)
         if east_file_df is not None:
             east_files.append(east_file_df)
 
-        west_file_df = ingest(d, satellite='WEST', **goes_kwargs)
+        west_sat = get_satellite('WEST', d)
+        west_file_df = ingest(d, satellite=west_sat, **goes_kwargs)
         if west_file_df is not None:
             west_files.append(west_file_df)
 
