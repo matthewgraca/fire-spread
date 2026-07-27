@@ -11,4 +11,4 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["gofer*", "viz*"]
+include = ["gofer*", "viz*", "scripts*"]
