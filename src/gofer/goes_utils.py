@@ -153,9 +153,15 @@ def eval_and_save_nc(
             encoding[name] = enc
 
     # realize the computation graph
-    with TqdmCallback(desc=f'Computing and saving {desc}' if verbose else None):
-        # swap from netcdf4. has loud harmless errors when writing to a 
-        #   netcdf file that doesn't already exist
+    if verbose:
+        with TqdmCallback(desc=f'Computing and saving {desc}'):
+            ds.to_netcdf(
+                str(save_path),
+                mode="w",
+                engine="h5netcdf", 
+                encoding=encoding
+            )
+    else:
         ds.to_netcdf(
             str(save_path),
             mode="w",

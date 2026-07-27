@@ -23,6 +23,9 @@ def _open_and_combine_ds(
         concat_dim="time",
         combine="nested",
         drop_variables=drop_variables,
+        data_vars='minimal',
+        compat='override',
+        coords='minimal',
         decode_times=False,
         parallel=True,
         chunks={"time": 1, "y": 1500, "x": 2500}
@@ -151,7 +154,8 @@ def aggregate(
     dates: pd.DatetimeIndex,
     data_var: str = 'MaskConfidence',
     fire_name: str = 'N/A',
-    is_perimeter: bool = True
+    is_perimeter: bool = True,
+    verbose: bool = True
 ) -> xr.Dataset:
     '''
     Pipeline:
@@ -186,7 +190,9 @@ def aggregate(
     out_dir = Path(temp_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     running_cummax = None
-    for hour, hour_df in (pbar := tqdm(files_df.groupby('timestamp'))):
+    for hour, hour_df in (
+        pbar := tqdm(files_df.groupby('timestamp'), disable=not verbose)
+    ):
         pbar.set_description(f'Processing {hour}')
 
         ds = _open_and_combine_ds(
