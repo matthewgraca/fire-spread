@@ -15,6 +15,10 @@ from matplotlib.colors import LinearSegmentedColormap
 
 from viz.gofer.tilers import CartoDBTiles
 
+import warnings
+# silence cartopy telling user a temp cache was made
+warnings.filterwarnings("ignore", message="Cartopy created the following directory to cache")
+
 
 def plot_perimeter(
     gofer_gdf: gpd.GeoDataFrame,

@@ -23,9 +23,6 @@ def _open_and_combine_ds(
         concat_dim="time",
         combine="nested",
         drop_variables=drop_variables,
-        data_vars='minimal',
-        compat='override',
-        coords='minimal',
         decode_times=False,
         parallel=True,
         chunks={"time": 1, "y": 1500, "x": 2500}
