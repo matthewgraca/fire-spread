@@ -36,6 +36,10 @@ def parse_args():
         help='Path to manifest CSV (columns: state, year, fire_name)'
     )
     parser.add_argument(
+        '--calfire-geojson', type=str, default=CALFIRE_GEOJSON,
+        help='Path to CalFire historic perimeters GeoJSON.'
+    )
+    parser.add_argument(
         '--goes-dir', type=str, default=GOES_SAVE_DIR,
         help='Directory for GOES data storage.'
     )
@@ -54,7 +58,7 @@ def main():
     tqdm.write(manifest.to_string(index=False))
     tqdm.write("")
 
-    calfire_gdf = read_calfire_geojson(CALFIRE_GEOJSON)
+    calfire_gdf = read_calfire_geojson(args.calfire_geojson)
 
     for _, fire_row in tqdm(
         manifest.iterrows(),

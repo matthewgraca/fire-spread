@@ -65,6 +65,10 @@ def parse_args():
         help='Path to manifest CSV (columns: state, year, fire_name)'
     )
     parser.add_argument(
+        '--calfire-geojson', type=str, default=CALFIRE_GEOJSON,
+        help='Path to CalFire historic perimeters GeoJSON.'
+    )
+    parser.add_argument(
         '--step', type=str, required=True, choices=PIPELINE_STEPS,
         help='Pipeline step to start from. All subsequent steps will also run.'
     )
@@ -406,7 +410,7 @@ def main():
     tqdm.write(f"Pipeline: {' → '.join(active_names)}")
     tqdm.write("")
 
-    calfire_gdf = read_calfire_geojson(CALFIRE_GEOJSON)
+    calfire_gdf = read_calfire_geojson(args.calfire_geojson)
 
     for _, fire_row in tqdm(
         manifest.iterrows(),

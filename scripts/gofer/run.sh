@@ -17,6 +17,7 @@ GOES_DIR="data/goes"
 TEMP_DIR="temp"
 OUT_DIR="out"
 DEM="data/dem/SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif"
+CALFIRE_GEOJSON="data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson"
 START_STEP="aggregate"
 CLEAN=true
 
@@ -27,6 +28,7 @@ echo "============================================================"
 
 python scripts/gofer/ingest.py \
     --manifest "$MANIFEST" \
+    --calfire-geojson "$CALFIRE_GEOJSON" \
     --goes-dir "$GOES_DIR" \
     --temp-dir "$TEMP_DIR"
 
@@ -43,6 +45,7 @@ fi
 
 python scripts/gofer/run_pipeline.py \
     --manifest "$MANIFEST" \
+    --calfire-geojson "$CALFIRE_GEOJSON" \
     --step "$START_STEP" \
     --goes-dir "$GOES_DIR" \
     --temp-dir "$TEMP_DIR" \
