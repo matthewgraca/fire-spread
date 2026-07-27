@@ -436,7 +436,8 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     plot_perimeter(
         gofer_gdf=polygons,
         ds=final_ds,
-        calfire_gdf=calfire_gdf,
+        #calfire_gdf=calfire_gdf,   # gee version (colored facecolors)
+        calfire_gdf=None,           # paper version (edges, black facecolor)
         extent=extent,
         title=f"GOFER {fire_name} {fire_year} — Fire Progression",
         save_path=viz_path,
