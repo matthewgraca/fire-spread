@@ -32,6 +32,12 @@ def _open_and_combine_ds(
     # ds.t.attrs['units'] = seconds since 2000-01-01 12:00:00
     origin = pd.Timestamp("2000-01-01 12:00:00")
     decoded_times = origin + pd.to_timedelta(ds["t"].values, unit="s")
+
+    # When a single file is opened, 'time' may exist as a scalar variable
+    # from the original GOES netCDF, conflicting with the concat dimension.
+    if "time" in ds.data_vars:
+        ds = ds.drop_vars("time")
+
     ds = ds.assign_coords(time=decoded_times)
 
     return ds 
