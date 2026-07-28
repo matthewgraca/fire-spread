@@ -3,6 +3,7 @@ import xarray as xr
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from tqdm import tqdm
 from tqdm.dask import TqdmCallback
 
 GRS80_ECCENTRICITY = 0.0818191910435
@@ -186,7 +187,7 @@ def eval_and_save_nc(
     '''
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     if verbose:
-        print(f'Saving to {save_path}...')
+        tqdm.write(f'Saving to {save_path}...')
 
     encoding = {}
     for name, da in ds.variables.items():
@@ -212,7 +213,7 @@ def eval_and_save_nc(
 
     # realize the computation graph
     if verbose:
-        with TqdmCallback(desc=f'Computing and saving {desc}'):
+        with TqdmCallback(desc=f'Computing and saving {desc}', leave=False):
             ds.to_netcdf(
                 str(save_path),
                 mode="w",
