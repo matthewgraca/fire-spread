@@ -1,7 +1,7 @@
-manifest: manifests/fires.csv
-calfire_geojson: data/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson
-goes_dir: data/goes
-temp_dir: temp
-out_dir: out
-dem: data/dem/SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif
+manifest: /home/mgraca/Workspace/fire-spread/manifests/fires.csv
+calfire_geojson: /mnt/wildfire/fire-spread/calfire/California_Historic_Fire_Perimeters_-4891938132824355098.geojson
+goes_dir: /mnt/wildfire/fire-spread/goes
+temp_dir: /mnt/wildfire/fire-spread/temp
+out_dir: /mnt/wildfire/fire-spread/out
+dem: /mnt/wildfire/fire-spread/dem/SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif
 clean: true
