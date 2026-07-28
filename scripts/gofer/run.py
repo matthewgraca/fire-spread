@@ -112,21 +112,17 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
     tqdm.write("Phase 1: Ingesting GOES data")
     tqdm.write("=" * 60)
 
-    outer = tqdm(
-        total=len(manifest),
-        desc="Ingesting fires",
-        unit="fire",
-        miniters=1,
-        mininterval=float("inf"),
-    )
+    import time
+    total = len(manifest)
+    start_time = time.time()
 
-    for _, fire_row in manifest.iterrows():
+    for i, (_, fire_row) in enumerate(manifest.iterrows(), start=1):
         fire_name = fire_row['fire_name']
         fire_year = int(fire_row['year'])
         fire_id = f"{fire_name.lower()}_{fire_year}"
         temp_dir = str(Path(cfg['temp_dir']) / fire_id)
 
-        tqdm.write(f"\n  Ingesting: {fire_name} ({fire_year})")
+        tqdm.write(f"\n  [{i}/{total}] Ingesting: {fire_name} ({fire_year})")
 
         try:
             fire = lookup_fire(calfire_gdf, fire_name, fire_year)
@@ -151,10 +147,12 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
             import traceback
             tqdm.write(traceback.format_exc())
 
-        outer.update(1)
-        outer.refresh()
-
-    outer.close()
+        elapsed = time.time() - start_time
+        avg_per_fire = elapsed / i
+        remaining = avg_per_fire * (total - i)
+        elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+        remaining_str = time.strftime("%H:%M:%S", time.gmtime(remaining))
+        tqdm.write(f"  [{i}/{total}] Elapsed: {elapsed_str} | Remaining: ~{remaining_str}")
 
 
 # --- Processing phase ---
@@ -166,20 +164,16 @@ def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: d
     tqdm.write("Phase 2: Processing pipeline")
     tqdm.write("=" * 60)
 
-    outer = tqdm(
-        total=len(manifest),
-        desc="Processing fires",
-        unit="fire",
-        miniters=1,
-        mininterval=float("inf"),  # never auto-refresh; we control updates
-    )
+    import time
+    total = len(manifest)
+    start_time = time.time()
 
-    for _, fire_row in manifest.iterrows():
+    for i, (_, fire_row) in enumerate(manifest.iterrows(), start=1):
         fire_name = fire_row['fire_name']
         fire_year = int(fire_row['year'])
         fire_id = f"{fire_name.lower()}_{fire_year}"
 
-        tqdm.write(f"\n  Processing: {fire_name} ({fire_year})")
+        tqdm.write(f"\n  [{i}/{total}] Processing: {fire_name} ({fire_year})")
 
         try:
             process_fire(fire_name, fire_year, fire_id, calfire_gdf, cfg)
@@ -189,10 +183,12 @@ def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: d
             import traceback
             tqdm.write(traceback.format_exc())
 
-        outer.update(1)
-        outer.refresh()
-
-    outer.close()
+        elapsed = time.time() - start_time
+        avg_per_fire = elapsed / i
+        remaining = avg_per_fire * (total - i)
+        elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+        remaining_str = time.strftime("%H:%M:%S", time.gmtime(remaining))
+        tqdm.write(f"  [{i}/{total}] Elapsed: {elapsed_str} | Remaining: ~{remaining_str}")
 
 
 def process_fire(
