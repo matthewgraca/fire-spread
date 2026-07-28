@@ -18,24 +18,33 @@ def _open_and_combine_ds(
     goes_filepaths: list[str],
     drop_variables=["Area", "Temp", "Power"]
 ) -> xr.Dataset:
+    filepaths = [Path(goes_save_dir) / Path(f) for f in goes_filepaths]
+
+    # Extract t (seconds since 2000-01-01 12:00:00) from each file manually.
+    # t is a scalar coordinate that xarray does not reliably concatenate.
+    origin = pd.Timestamp("2000-01-01 12:00:00")
+    t_values = []
+    for fp in filepaths:
+        with xr.open_dataset(fp, decode_times=False) as tmp:
+            t_val = tmp["t"].values
+            if np.ndim(t_val) == 0:
+                t_values.append(float(t_val))
+            else:
+                t_values.extend(t_val.astype(float).tolist())
+    decoded_times = origin + pd.to_timedelta(t_values, unit="s")
+
     ds = xr.open_mfdataset(
-        [Path(goes_save_dir) / Path(f) for f in goes_filepaths],
+        filepaths,
         concat_dim="time",
         combine="nested",
         data_vars="all",
-        drop_variables=drop_variables,
+        coords="minimal",
+        compat="override",
+        drop_variables=drop_variables + ["t"],
         decode_times=False,
         parallel=True,
         chunks={"time": 1, "y": 1500, "x": 2500}
     )
-    
-    # decode_times=True sometimes plays out poorly, so we'll do it manually
-    # ds.t.attrs['units'] = seconds since 2000-01-01 12:00:00
-    origin = pd.Timestamp("2000-01-01 12:00:00")
-    decoded_times = origin + pd.to_timedelta(ds["t"].values, unit="s")
-
-    # handles hours with only single files
-    decoded_times = np.atleast_1d(decoded_times)
 
     ds = ds.assign_coords(time=decoded_times)
 
