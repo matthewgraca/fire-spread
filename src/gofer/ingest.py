@@ -189,7 +189,7 @@ def download(
     west_files = []
     east_files = []
 
-    for d in (pbar := tqdm(ingest_dates.tz_localize(None))):
+    for d in (pbar := tqdm(ingest_dates.tz_localize(None), leave=False)):
         pbar.set_description(f'Ingesting GOES-East and GOES-West on {d}')
 
         east_sat = get_satellite('EAST', d)
