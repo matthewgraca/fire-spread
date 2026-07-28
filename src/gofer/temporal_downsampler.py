@@ -22,6 +22,7 @@ def _open_and_combine_ds(
         [Path(goes_save_dir) / Path(f) for f in goes_filepaths],
         concat_dim="time",
         combine="nested",
+        data_vars="all",
         drop_variables=drop_variables,
         decode_times=False,
         parallel=True,
@@ -33,10 +34,8 @@ def _open_and_combine_ds(
     origin = pd.Timestamp("2000-01-01 12:00:00")
     decoded_times = origin + pd.to_timedelta(ds["t"].values, unit="s")
 
-    # When a single file is opened, 'time' may exist as a scalar variable
-    # from the original GOES netCDF, conflicting with the concat dimension.
-    if "time" in ds.data_vars:
-        ds = ds.drop_vars("time")
+    # handles hours with only single files
+    decoded_times = np.atleast_1d(decoded_times)
 
     ds = ds.assign_coords(time=decoded_times)
 

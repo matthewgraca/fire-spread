@@ -171,5 +171,33 @@ class TestTemporalDownsamplerActiveFire(unittest.TestCase):
         self.assertGreater(float(sums[1]), 0.0)
 
 
+class TestSingleFileHour(unittest.TestCase):
+    """
+    Test that _open_and_combine_ds handles hours with only a single GOES file.
+
+    When only one file exists for an hour, 't' is a scalar coordinate, causing
+    decoded_times to be a scalar Timestamp. This must be handled so
+    assign_coords(time=...) doesn't conflict with the 'time' dimension created
+    by concat_dim.
+    """
+
+    def test_single_file_does_not_raise(self):
+        """Opening a single real GOES file should not raise ValueError."""
+        from gofer.temporal_downsampler import _open_and_combine_ds
+
+        goes_save_dir = "tests/gofer/data"
+        filepath = "temporal/OR_ABI-L2-FDCC-M6_G18_s20250131411181_e20250131413554_c20250131414126.nc"
+
+        ds = _open_and_combine_ds(
+            goes_save_dir=goes_save_dir,
+            goes_filepaths=[filepath],
+        )
+
+        self.assertIn("time", ds.dims)
+        self.assertEqual(ds.sizes["time"], 1)
+        self.assertIn("time", ds.coords)
+        ds.close()
+
+
 if __name__ == "__main__":
     unittest.main()
