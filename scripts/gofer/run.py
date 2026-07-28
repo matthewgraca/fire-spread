@@ -112,12 +112,15 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
     tqdm.write("Phase 1: Ingesting GOES data")
     tqdm.write("=" * 60)
 
-    for _, fire_row in tqdm(
-        manifest.iterrows(),
+    outer = tqdm(
         total=len(manifest),
         desc="Ingesting fires",
         unit="fire",
-    ):
+        miniters=1,
+        mininterval=float("inf"),
+    )
+
+    for _, fire_row in manifest.iterrows():
         fire_name = fire_row['fire_name']
         fire_year = int(fire_row['year'])
         fire_id = f"{fire_name.lower()}_{fire_year}"
@@ -147,7 +150,11 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
             tqdm.write(f"  ✗ {fire_name} ({fire_year}) FAILED: {e}")
             import traceback
             tqdm.write(traceback.format_exc())
-            continue
+
+        outer.update(1)
+        outer.refresh()
+
+    outer.close()
 
 
 # --- Processing phase ---
@@ -159,12 +166,15 @@ def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: d
     tqdm.write("Phase 2: Processing pipeline")
     tqdm.write("=" * 60)
 
-    for _, fire_row in tqdm(
-        manifest.iterrows(),
+    outer = tqdm(
         total=len(manifest),
         desc="Processing fires",
         unit="fire",
-    ):
+        miniters=1,
+        mininterval=float("inf"),  # never auto-refresh; we control updates
+    )
+
+    for _, fire_row in manifest.iterrows():
         fire_name = fire_row['fire_name']
         fire_year = int(fire_row['year'])
         fire_id = f"{fire_name.lower()}_{fire_year}"
@@ -178,7 +188,11 @@ def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: d
             tqdm.write(f"  ✗ {fire_name} ({fire_year}) FAILED: {e}")
             import traceback
             tqdm.write(traceback.format_exc())
-            continue
+
+        outer.update(1)
+        outer.refresh()
+
+    outer.close()
 
 
 def process_fire(
