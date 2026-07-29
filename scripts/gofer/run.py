@@ -11,6 +11,7 @@ Usage:
 """
 import pickle
 import shutil
+import time
 from argparse import ArgumentParser
 from pathlib import Path
 
@@ -30,8 +31,10 @@ from gofer.postprocess import binarize, round_to, trim_inactive_timesteps
 from gofer.spatial_smoothing import smooth
 from gofer.temporal_downsampler import aggregate
 from gofer.vectorize import raster_to_polygon
+from gofer.style import Style
 
 BBOX_BUFFER = 0.1
+S = Style()
 
 
 def load_manifest(manifest_path: str) -> pd.DataFrame:
@@ -108,11 +111,8 @@ def parse_args():
 
 def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict):
     """Download GOES data for all fires in the manifest."""
-    tqdm.write("=" * 60)
-    tqdm.write("Phase 1: Ingesting GOES data")
-    tqdm.write("=" * 60)
+    tqdm.write(S.phase("Phase 1: Ingesting GOES data"))
 
-    import time
     total = len(manifest)
     start_time = time.time()
 
@@ -122,7 +122,7 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
         fire_id = f"{fire_name.lower()}_{fire_year}"
         temp_dir = str(Path(cfg['temp_dir']) / fire_id)
 
-        tqdm.write(f"\n  [{i}/{total}] Ingesting: {fire_name} ({fire_year})")
+        tqdm.write(f"\n{S.fire_header(i, total, fire_name, fire_year)}")
 
         try:
             fire = lookup_fire(calfire_gdf, fire_name, fire_year)
@@ -141,18 +141,18 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
                 lat_min=float(fire['bbox_min_lat']),
                 lat_max=float(fire['bbox_max_lat']),
             )
-            tqdm.write(f"  ✓ {fire_name} ({fire_year}) ingested.")
+            tqdm.write(S.success(fire_name, fire_year))
         except Exception as e:
-            tqdm.write(f"  ✗ {fire_name} ({fire_year}) FAILED: {e}")
+            tqdm.write(S.error(fire_name, fire_year, str(e)))
             import traceback
-            tqdm.write(traceback.format_exc())
+            tqdm.write(S.traceback(traceback.format_exc()))
 
         elapsed = time.time() - start_time
         avg_per_fire = elapsed / i
         remaining = avg_per_fire * (total - i)
         elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
         remaining_str = time.strftime("%H:%M:%S", time.gmtime(remaining))
-        tqdm.write(f"  [{i}/{total}] Elapsed: {elapsed_str} | Remaining: ~{remaining_str}")
+        tqdm.write(S.timing(i, total, elapsed_str, remaining_str))
 
 
 # --- Processing phase ---
@@ -160,11 +160,8 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
 def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict):
     """Run the full processing pipeline for all fires in the manifest."""
     tqdm.write("")
-    tqdm.write("=" * 60)
-    tqdm.write("Phase 2: Processing pipeline")
-    tqdm.write("=" * 60)
+    tqdm.write(S.phase("Phase 2: Processing pipeline"))
 
-    import time
     total = len(manifest)
     start_time = time.time()
 
@@ -173,22 +170,22 @@ def run_processing(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: d
         fire_year = int(fire_row['year'])
         fire_id = f"{fire_name.lower()}_{fire_year}"
 
-        tqdm.write(f"\n  [{i}/{total}] Processing: {fire_name} ({fire_year})")
+        tqdm.write(f"\n{S.fire_header(i, total, fire_name, fire_year)}")
 
         try:
             process_fire(fire_name, fire_year, fire_id, calfire_gdf, cfg)
-            tqdm.write(f"  ✓ {fire_name} ({fire_year}) complete.")
+            tqdm.write(S.success(fire_name, fire_year))
         except Exception as e:
-            tqdm.write(f"  ✗ {fire_name} ({fire_year}) FAILED: {e}")
+            tqdm.write(S.error(fire_name, fire_year, str(e)))
             import traceback
-            tqdm.write(traceback.format_exc())
+            tqdm.write(S.traceback(traceback.format_exc()))
 
         elapsed = time.time() - start_time
         avg_per_fire = elapsed / i
         remaining = avg_per_fire * (total - i)
         elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed))
         remaining_str = time.strftime("%H:%M:%S", time.gmtime(remaining))
-        tqdm.write(f"  [{i}/{total}] Elapsed: {elapsed_str} | Remaining: ~{remaining_str}")
+        tqdm.write(S.timing(i, total, elapsed_str, remaining_str))
 
 
 def process_fire(
@@ -233,27 +230,27 @@ def process_fire(
         )
 
     # [1/6] Aggregate
-    tqdm.write(f"    [1/6] Aggregating...")
+    tqdm.write(S.step(1, 6, "Aggregating..."))
     west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name)
 
     # [2/6] Scale
-    tqdm.write(f"    [2/6] Scaling early perimeters...")
+    tqdm.write(S.step(2, 6, "Scaling early perimeters..."))
     west_ds, east_ds = step_scale(west_ds, east_ds, dem, bbox, netcdf_dir)
 
     # [3/6] Ortho
-    tqdm.write(f"    [3/6] Orthorectifying...")
+    tqdm.write(S.step(3, 6, "Orthorectifying..."))
     west_ds, east_ds = step_ortho(west_ds, east_ds, dem, bbox, netcdf_dir)
 
     # [4/6] Composite
-    tqdm.write(f"    [4/6] Compositing...")
+    tqdm.write(S.step(4, 6, "Compositing..."))
     ds = step_composite(west_ds, east_ds, dates, netcdf_dir)
 
     # [5/6] Smooth
-    tqdm.write(f"    [5/6] Smoothing...")
+    tqdm.write(S.step(5, 6, "Smoothing..."))
     ds = step_smooth(ds, netcdf_dir)
 
     # [6/6] Final
-    tqdm.write(f"    [6/6] Final processing...")
+    tqdm.write(S.step(6, 6, "Final processing..."))
     calfire_ref = calfire_gdf.loc[
         (calfire_gdf['FIRE_NAME'] == fire_name) &
         (calfire_gdf['YEAR_'] == fire_year)
@@ -264,7 +261,7 @@ def process_fire(
 
     # Cleanup intermediates
     if cfg['clean'] and Path(netcdf_dir).exists():
-        tqdm.write(f"    Cleaning intermediate files...")
+        tqdm.write(S.substep("Cleaning intermediate files...", last_step=True))
         shutil.rmtree(netcdf_dir)
 
 
@@ -275,7 +272,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
     """Remap, temporally downsample, and aggregate both satellites."""
     results = {}
     for sat in ['west', 'east']:
-        tqdm.write(f"      Aggregating GOES-{sat.capitalize()}...")
+        tqdm.write(S.substep(f"Aggregating GOES-{sat.capitalize()}..."))
         ds = aggregate(
             goes_save_dir=goes_save_dir,
             csv_path=str(Path(temp_dir) / f'{sat}_files.csv'),
@@ -300,7 +297,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
     """Compute and apply early perimeter scaling factors."""
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
-        tqdm.write(f"      Scaling GOES-{sat.capitalize()}...")
+        tqdm.write(S.substep(f"Scaling GOES-{sat.capitalize()}..."))
         sf = get_scaling_factors(
             ds,
             ortho_kwargs={'dem_filepath': dem_filepath, 'bbox': bbox},
@@ -324,7 +321,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
     """Orthorectify both satellite datasets."""
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
-        tqdm.write(f"      Orthorectifying GOES-{sat.capitalize()}...")
+        tqdm.write(S.substep(f"Orthorectifying GOES-{sat.capitalize()}..."))
         ortho_ds = orthorectify(
             ds,
             dem_filepath=dem_filepath,
@@ -345,7 +342,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     """Composite East and West into a single dataset."""
-    tqdm.write("      Compositing East and West...")
+    tqdm.write(S.substep("Compositing East and West..."))
     composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
     west_ds.close()
     east_ds.close()
@@ -361,7 +358,7 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
 
 def step_smooth(ds, netcdf_dir: str):
     """Apply spatial smoothing."""
-    tqdm.write("      Smoothing...")
+    tqdm.write(S.substep("Smoothing..."))
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
     ds.close()
     smoothed_ds = eval_and_save_nc(
@@ -385,7 +382,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     fire_year = fire_meta['fire_year']
     fire_id = f"{fire_name.lower()}_{fire_year}"
 
-    tqdm.write("      Rounding, binarizing, trimming...")
+    tqdm.write(S.substep("Rounding, binarizing, trimming...", last_step=True))
     final_ds = round_to(ds, data_var='MaskConfidence', decimals=2)
     final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
     final_ds = trim_inactive_timesteps(final_ds, data_var='MaskConfidence')
@@ -421,19 +418,19 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         desc='final processing',
         verbose=True,
     )
-    tqdm.write(f"      Saved: {nc_path}")
+    tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
     # Vectorize
-    tqdm.write("      Vectorizing...")
+    tqdm.write(S.substep("Vectorizing...", last_step=True))
     polygons = raster_to_polygon(final_ds, data_var='MaskConfidence', simplify_factor=2.0)
 
     # Save GeoJSON
     geojson_path = str(vectors_dir / f'{fire_id}_gofer.geojson')
     polygons.to_file(geojson_path, driver='GeoJSON')
-    tqdm.write(f"      Saved: {geojson_path}")
+    tqdm.write(S.substep(f"Saved: {geojson_path}", last_step=True))
 
     # Visualization
-    tqdm.write("      Generating visualization...")
+    tqdm.write(S.substep("Generating visualization...", last_step=True))
     buffer = 0.05
     extent = [
         float(final_ds.longitude.min()) - buffer,
@@ -477,9 +474,7 @@ def main():
         run_processing(manifest, calfire_gdf, cfg)
 
     tqdm.write("")
-    tqdm.write("=" * 60)
-    tqdm.write("Done.")
-    tqdm.write("=" * 60)
+    tqdm.write(S.phase("Done."))
 
 
 if __name__ == "__main__":
