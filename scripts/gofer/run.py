@@ -273,6 +273,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
     results = {}
     for sat in ['west', 'east']:
         tqdm.write(S.substep(f"Aggregating GOES-{sat.capitalize()}..."))
+        save_path = str(Path(netcdf_dir) / sat / 'aggregated.nc')
         ds = aggregate(
             goes_save_dir=goes_save_dir,
             csv_path=str(Path(temp_dir) / f'{sat}_files.csv'),
@@ -284,11 +285,12 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
         ds = eval_and_save_nc(
             ds,
             chunk_size=(1, 1500, 2500),
-            save_path=str(Path(netcdf_dir) / sat / 'aggregated.nc'),
+            save_path=save_path,
             chunks='auto',
             desc=f'{sat} aggregation',
             verbose=True,
         )
+        tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ds
     return results['west'], results['east']
 
@@ -298,6 +300,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
         tqdm.write(S.substep(f"Scaling GOES-{sat.capitalize()}..."))
+        save_path = str(Path(netcdf_dir) / sat / 'scaled.nc')
         sf = get_scaling_factors(
             ds,
             ortho_kwargs={'dem_filepath': dem_filepath, 'bbox': bbox},
@@ -308,11 +311,12 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         scaled_ds = eval_and_save_nc(
             scaled_ds,
             chunk_size=(1, 1500, 2500),
-            save_path=str(Path(netcdf_dir) / sat / 'scaled.nc'),
+            save_path=save_path,
             chunks={'time': 1},
             desc=f'{sat} scaling',
             verbose=True,
         )
+        tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = scaled_ds
     return results['west'], results['east']
 
@@ -322,6 +326,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
         tqdm.write(S.substep(f"Orthorectifying GOES-{sat.capitalize()}..."))
+        save_path = str(Path(netcdf_dir) / sat / 'ortho.nc')
         ortho_ds = orthorectify(
             ds,
             dem_filepath=dem_filepath,
@@ -331,11 +336,12 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         ds.close()
         ortho_ds = eval_and_save_nc(
             ortho_ds,
-            save_path=str(Path(netcdf_dir) / sat / 'ortho.nc'),
+            save_path=save_path,
             chunks='auto',
             desc=f'{sat} orthorectification',
             verbose=True,
         )
+        tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ortho_ds
     return results['west'], results['east']
 
@@ -343,31 +349,35 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     """Composite East and West into a single dataset."""
     tqdm.write(S.substep("Compositing East and West..."))
+    save_path = str(Path(netcdf_dir) / 'composited.nc')
     composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
     west_ds.close()
     east_ds.close()
     composite_ds = eval_and_save_nc(
         composite_ds,
-        save_path=str(Path(netcdf_dir) / 'composited.nc'),
+        save_path=save_path,
         chunks='auto',
         desc='compositing',
         verbose=True,
     )
+    tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
 
 
 def step_smooth(ds, netcdf_dir: str):
     """Apply spatial smoothing."""
     tqdm.write(S.substep("Smoothing..."))
+    save_path = str(Path(netcdf_dir) / 'smoothed.nc')
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
     ds.close()
     smoothed_ds = eval_and_save_nc(
         smoothed_ds,
-        save_path=str(Path(netcdf_dir) / 'smoothed.nc'),
+        save_path=save_path,
         chunks='auto',
         desc='smoothing',
         verbose=True,
     )
+    tqdm.write(S.substep(f"Saved to {save_path}"))
     return smoothed_ds
 
 
