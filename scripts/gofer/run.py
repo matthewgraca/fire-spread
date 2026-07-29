@@ -392,7 +392,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     Final processing: round, binarize, trim, save netCDF, vectorize,
     save GeoJSON, and produce visualization.
     """
-    from viz.gofer.fire_perimeter import plot_perimeter
+    from viz.gofer.fire_perimeter import plot_perimeter, plot_perimeter_comparison
 
     fire_name = fire_meta['fire_name']
     fire_year = fire_meta['fire_year']
@@ -465,6 +465,18 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         title=f"GOFER {fire_name} {fire_year} — Fire Progression",
         save_path=viz_path,
     )
+
+    # Comparison visualization: GOFER vs FRAP final perimeters
+    if calfire_gdf is not None:
+        tqdm.write(S.substep("Generating comparison visualization...", last_step=True))
+        comparison_path = str(images_dir / f'{fire_id}_comparison.png')
+        plot_perimeter_comparison(
+            gofer_gdf=polygons,
+            calfire_gdf=calfire_gdf,
+            extent=extent,
+            title=f"GOFER vs FRAP — {fire_name} {fire_year}",
+            save_path=comparison_path,
+        )
 
     return final_ds, polygons
 

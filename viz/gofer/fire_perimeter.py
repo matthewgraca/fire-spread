@@ -163,3 +163,77 @@ def plot_perimeter(
         print(f"Saved to {save_path}")
 
     plt.close()
+
+
+def plot_perimeter_comparison(
+    gofer_gdf: gpd.GeoDataFrame,
+    calfire_gdf: gpd.GeoDataFrame,
+    extent: list = None,
+    title: str = "GOFER vs FRAP — Final Perimeter Comparison",
+    save_path: str = None,
+):
+    """
+    Compare the final fire perimeter from GOFER against the FRAP/CalFire
+    reference perimeter on a streetmap basemap.
+
+    Only the final (last timestep) GOFER perimeter is plotted, alongside
+    the CalFire reference. This allows direct visual comparison of the
+    two final boundaries.
+
+    Args:
+        gofer_gdf: GeoDataFrame from raster_to_polygon. If multi-timestep,
+            only the last timestep is used.
+        calfire_gdf: CalFire/FRAP reference perimeter GeoDataFrame.
+        extent: [lon_min, lon_max, lat_min, lat_max] for the plot.
+        title: Plot title.
+        save_path: If provided, save the figure to this path.
+    """
+    tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
+    fig, ax = plt.subplots(
+        1, 1, figsize=(16, 12),
+        subplot_kw={'projection': ccrs.PlateCarree()},
+        layout='constrained'
+    )
+
+    # Streetmap basemap
+    ax.add_image(tiler, 12)
+
+    if extent is not None:
+        ax.set_extent(extent, crs=ccrs.PlateCarree())
+
+    # Get final GOFER perimeter
+    if 'time' in gofer_gdf.columns and len(gofer_gdf) > 1:
+        gofer_final = gpd.GeoDataFrame([gofer_gdf.iloc[-1]], crs=gofer_gdf.crs)
+    else:
+        gofer_final = gofer_gdf
+
+    # Plot CalFire/FRAP reference
+    calfire_gdf.to_crs(epsg=4326).plot(
+        ax=ax,
+        transform=ccrs.PlateCarree(),
+        facecolor='none',
+        edgecolor='blue',
+        linewidth=2.5,
+        label='FRAP (CalFire)',
+        zorder=4,
+    )
+
+    # Plot GOFER final perimeter
+    gofer_final.to_crs(epsg=4326).plot(
+        ax=ax,
+        transform=ccrs.PlateCarree(),
+        facecolor='none',
+        edgecolor='red',
+        linewidth=2.5,
+        label='GOFER',
+        zorder=5,
+    )
+
+    ax.set_title(title)
+    ax.legend(loc='upper right', fontsize=12)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Saved to {save_path}")
+
+    plt.close()
