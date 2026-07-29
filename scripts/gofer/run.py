@@ -82,6 +82,7 @@ def load_config(config_path: str) -> dict:
 
     # Defaults
     cfg.setdefault('clean', False)
+    cfg.setdefault('memory_limit', '50GB')
     return cfg
 
 
@@ -469,9 +470,19 @@ def main():
     args = parse_args()
     cfg = load_config(args.config)
 
+    # Set up dask distributed scheduler with memory limit
+    from dask.distributed import Client, LocalCluster
+    cluster = LocalCluster(
+        n_workers=1,
+        threads_per_worker=4,
+        memory_limit=cfg['memory_limit'],
+    )
+    client = Client(cluster)
+
     manifest = load_manifest(cfg['manifest'])
     tqdm.write(f"Config: {args.config}")
     tqdm.write(f"Manifest: {len(manifest)} fire(s)")
+    tqdm.write(f"Memory limit: {cfg['memory_limit']}")
     tqdm.write(manifest.to_string(index=False))
     tqdm.write("")
 
