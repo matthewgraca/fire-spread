@@ -339,7 +339,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         ortho_ds = eval_and_save_nc(
             ortho_ds,
             save_path=save_path,
-            chunks='auto',
+            chunks={'time': 1},
             desc=f'{sat} orthorectification',
             verbose=True,
         )
@@ -354,14 +354,15 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
 
     tqdm.write(S.substep("Compositing East and West..."))
     save_path = str(Path(netcdf_dir) / 'composited.nc')
-    composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
-    west_ds.close()
-    east_ds.close()
+
     with dask.config.set(scheduler='synchronous'):
+        composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
+        west_ds.close()
+        east_ds.close()
         composite_ds = eval_and_save_nc(
             composite_ds,
             save_path=save_path,
-            chunks='auto',
+            chunks={'time': 1},
             desc='compositing',
             verbose=True,
         )
