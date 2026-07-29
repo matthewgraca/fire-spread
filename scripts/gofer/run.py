@@ -349,23 +349,73 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
 
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
-    """Composite East and West into a single dataset."""
-    import dask
-
+    """Composite East and West into a single dataset, one time slice at a time."""
     tqdm.write(S.substep("Compositing East and West..."))
     save_path = str(Path(netcdf_dir) / 'composited.nc')
 
-    with dask.config.set(scheduler='synchronous'):
-        composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
-        west_ds.close()
-        east_ds.close()
-        composite_ds = eval_and_save_nc(
-            composite_ds,
-            save_path=save_path,
-            chunks={'time': 1},
-            desc='compositing',
-            verbose=True,
+    # Process slice-by-slice to avoid loading both full datasets into RAM.
+    # For each timestep: read one west slice + one east slice, average, write.
+    out_dir = Path(netcdf_dir) / 'composite_slices'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    n_times = west_ds.sizes['time']
+    slice_paths = []
+
+    for t in range(n_times):
+        west_slice = west_ds['MaskConfidence'].isel(time=t).load()
+        east_slice = east_ds['MaskConfidence'].isel(time=t).load()
+
+        merged = np.nanmean(
+            np.stack([west_slice.values, east_slice.values], axis=0),
+            axis=0
         )
+
+        time_val = west_ds.time.values[t]
+        ds_slice = xr.Dataset(
+            data_vars={
+                'MaskConfidence': (['latitude', 'longitude'], merged),
+            },
+            coords={
+                'latitude': west_ds.latitude.values,
+                'longitude': west_ds.longitude.values,
+                'time': time_val,
+            },
+        )
+
+        slice_path = out_dir / f'{t:05d}.nc'
+        ds_slice.to_netcdf(str(slice_path), engine='scipy')
+        slice_paths.append(slice_path)
+
+        del west_slice, east_slice, merged, ds_slice
+
+    keep_attrs = {'fire_name', 'description', 'active_fire', 'fire_perimeter'}
+    carried_attrs = {k: west_ds.attrs[k] for k in west_ds.attrs if k in keep_attrs}
+
+    west_ds.close()
+    east_ds.close()
+
+    # Combine slices into final dataset
+    composite_ds = xr.open_mfdataset(
+        [str(p) for p in sorted(slice_paths)],
+        combine='nested',
+        concat_dim='time',
+        chunks={'time': 1},
+    )
+
+    composite_ds = composite_ds.assign_attrs(pipeline='composited', **carried_attrs)
+
+    composite_ds = eval_and_save_nc(
+        composite_ds,
+        save_path=save_path,
+        chunks={'time': 1},
+        desc='compositing',
+        verbose=True,
+    )
+
+    # Cleanup slice files
+    import shutil
+    shutil.rmtree(out_dir)
+
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
 
@@ -392,7 +442,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     Final processing: round, binarize, trim, save netCDF, vectorize,
     save GeoJSON, and produce visualization.
     """
-    from viz.gofer.fire_perimeter import plot_perimeter, plot_perimeter_comparison
+    from viz.gofer.fire_perimeter import plot_progression, plot_perimeter_comparison
 
     fire_name = fire_meta['fire_name']
     fire_year = fire_meta['fire_year']
@@ -447,21 +497,10 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
 
     # Visualization
     tqdm.write(S.substep("Generating visualization...", last_step=True))
-    buffer = 0.05
-    extent = [
-        float(final_ds.longitude.min()) - buffer,
-        float(final_ds.longitude.max()) + buffer,
-        float(final_ds.latitude.min()) - buffer,
-        float(final_ds.latitude.max()) + buffer,
-    ]
-
     viz_path = str(images_dir / f'{fire_id}_progression.png')
-    plot_perimeter(
+    plot_progression(
         gofer_gdf=polygons,
         ds=final_ds,
-        #calfire_gdf=calfire_gdf,   # gee version (colored facecolors)
-        calfire_gdf=None,           # paper version (edges, black facecolor)
-        extent=extent,
         title=f"GOFER {fire_name} {fire_year} — Fire Progression",
         save_path=viz_path,
     )
@@ -472,8 +511,8 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         comparison_path = str(images_dir / f'{fire_id}_comparison.png')
         plot_perimeter_comparison(
             gofer_gdf=polygons,
+            ds=final_ds,
             calfire_gdf=calfire_gdf,
-            extent=extent,
             title=f"GOFER vs FRAP — {fire_name} {fire_year}",
             save_path=comparison_path,
         )
