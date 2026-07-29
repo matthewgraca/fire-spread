@@ -202,7 +202,7 @@ def aggregate(
     out_dir.mkdir(parents=True, exist_ok=True)
     running_cummax = None
     for hour, hour_df in (
-        pbar := tqdm(files_df.groupby('timestamp'), disable=not verbose, leave=False)
+        pbar := tqdm(files_df.groupby('timestamp'), disable=not verbose, leave=False, delay=1)
     ):
         pbar.set_description(f'Processing {hour}')
 
