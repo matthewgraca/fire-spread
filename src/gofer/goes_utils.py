@@ -210,7 +210,7 @@ def eval_and_save_nc(
 
     # realize the computation graph
     if verbose:
-        with TqdmCallback(desc=f'Computing and saving {desc}', leave=False):
+        with TqdmCallback(desc=f'Computing and saving {desc}', leave=False, delay=1):
             ds.to_netcdf(
                 str(save_path),
                 mode="w",
