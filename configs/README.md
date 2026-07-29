@@ -15,7 +15,13 @@ Options:
     - Example: `/mnt/wildfire/fire-spread/out`
 - `dem`: The path of the digital elevation map that will be used for orthorectification.
     - Example: `/mnt/wildfire/fire-spread/dem/SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif`
-- `clean`: Whether or not to delete the contents of the temp folder after processing. Usually a good idea since these intermediate steps generate massive files.
+- `clean`: Whether or not to delete the contents of the temp folder after processing. 
     - Example: `true`
+    - Recommendation: Keep `true`, the intermediate files can get large.
 - `memory_limit`: String detailing the amount of memory you want allocated in RAM to run the GOFER pipeline. Dask will handle the rest.
     - Example: `50GB`
+    - Recommendation: Your available RAM - 14GB
+- `threads`: Integer detailing the number of threads you want Dask to allocate to the job.
+    - Example: `12`
+    - Recommendation: Your available threadcount // 2
+    - Note: Since this script is expected to have limited users, we didn't feel the need to automagically determine these parameters.

@@ -83,6 +83,7 @@ def load_config(config_path: str) -> dict:
     # Defaults
     cfg.setdefault('clean', False)
     cfg.setdefault('memory_limit', '50GB')
+    cfg.setdefault('threads', 12)
     return cfg
 
 
@@ -474,7 +475,7 @@ def main():
     from dask.distributed import Client, LocalCluster
     cluster = LocalCluster(
         n_workers=1,
-        threads_per_worker=4,
+        threads_per_worker=cfg['threads'],
         memory_limit=cfg['memory_limit'],
     )
     client = Client(cluster)
