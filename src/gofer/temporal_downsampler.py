@@ -157,6 +157,22 @@ def _clean_ds(
     return ds_clean 
 
 
+def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: str) -> str:
+    """Process a single hour: open, remap, downsample, clean, save."""
+    ds = _open_and_combine_ds(
+        goes_save_dir=goes_save_dir,
+        goes_filepaths=goes_filepaths
+    )
+    ds = map_fdc_mask_to_confidence(ds)
+    ds = _downsample(ds, hour)
+    ds = _clean_ds(ds)
+    path = Path(out_dir) / Path(hour.isoformat() + '.nc')
+    encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
+    ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
+    ds.close()
+    return str(path)
+
+
 def aggregate(
     goes_save_dir: str,
     csv_path: str,
@@ -198,7 +214,7 @@ def aggregate(
     Returns:
         xr.Dataset: A dataset with the temporally downsampled dataset.
     '''
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ProcessPoolExecutor, as_completed
 
     files_df = _read_csv(csv_path)
     out_dir = Path(temp_dir)
@@ -207,24 +223,12 @@ def aggregate(
     hourly_groups = list(files_df.groupby('timestamp'))
 
     # Phase 1: Parallel downsample (open, remap, downsample, clean, save)
-    def _process_hour(hour, hour_df):
-        ds = _open_and_combine_ds(
-            goes_save_dir=goes_save_dir,
-            goes_filepaths=hour_df['file'].to_list()
-        )
-        ds = map_fdc_mask_to_confidence(ds)
-        ds = _downsample(ds, hour)
-        ds = _clean_ds(ds)
-        path = out_dir / Path(hour.isoformat() + '.nc')
-        encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
-        ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
-        ds.close()
-        return path
-
     dataset_paths = []
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_process_hour, hour, hour_df): hour
+            pool.submit(
+                _process_hour, goes_save_dir, hour_df['file'].to_list(), hour, str(out_dir)
+            ): hour
             for hour, hour_df in hourly_groups
         }
         with tqdm(total=len(futures), disable=not verbose, leave=False,
