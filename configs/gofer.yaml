@@ -5,4 +5,4 @@ temp_dir: /mnt/wildfire/fire-spread/temp
 out_dir: /mnt/wildfire/fire-spread/out
 dem: /mnt/wildfire/fire-spread/dem/SRTMGL3_NC.003_SRTMGL3_DEM_doy2000042000000_aid0001.tif
 clean: true
-threads: 12
+workers: 12

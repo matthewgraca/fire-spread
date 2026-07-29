@@ -82,7 +82,7 @@ def load_config(config_path: str) -> dict:
 
     # Defaults
     cfg.setdefault('clean', False)
-    cfg.setdefault('threads', 12)
+    cfg.setdefault('workers', 12)
     return cfg
 
 
@@ -232,7 +232,7 @@ def process_fire(
 
     # [1/6] Aggregate
     tqdm.write(S.step(1, 6, "Aggregating..."))
-    west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name, cfg['threads'])
+    west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name, cfg['workers'])
 
     # [2/6] Scale
     tqdm.write(S.step(2, 6, "Scaling early perimeters..."))

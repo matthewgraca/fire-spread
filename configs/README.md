@@ -18,7 +18,7 @@ Options:
 - `clean`: Whether or not to delete the contents of the temp folder after processing. 
     - Example: `true`
     - Recommendation: Keep `true`, the intermediate files can get large.
-- `threads`: Integer detailing the number of threads you want `ThreadPoolExecutor` to allocate to the job of subhourly merge into hourly netcdfs.
+- `workers`: Integer detailing the number of processes you want `ProcessPoolExecutor` to allocate to the job of subhourly merge into hourly netcdfs.
     - Example: `12`
-    - Recommendation: Your available threadcount // 2, as Python/xarray overhead will be the limiter here, not I/O if you're cool and use an NVME drive here.
+    - Recommendation: Your available threadcount // 2 works well here, as the downsampler expects to use 2 threads (hdf5 I/O + numpy), so this should be your max. Targeting 70-80% CPU usage would be fine too.
     - Note: Since this script is expected to have limited users, we didn't feel the need to automagically determine this parameter.
