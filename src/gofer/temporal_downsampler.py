@@ -42,8 +42,7 @@ def _open_and_combine_ds(
         compat="override",
         drop_variables=drop_variables + ["t"],
         decode_times=False,
-        parallel=True,
-        chunks={"time": 1, "y": 1500, "x": 2500}
+        parallel=False,
     )
 
     ds = ds.assign_coords(time=decoded_times)
@@ -166,14 +165,16 @@ def aggregate(
     data_var: str = 'MaskConfidence',
     fire_name: str = 'N/A',
     is_perimeter: bool = True,
-    verbose: bool = True
+    verbose: bool = True,
+    max_workers: int = 12
 ) -> xr.Dataset:
     '''
     Pipeline:
-        1. Remamp -- Maps FDC Mask data to confidence values
+        1. Remap -- Maps FDC Mask data to confidence values
         2. Temporal downsample -- gathers all subhourly observations and 
-            groups them into hourly observations
-        3. Imputation -- any gaps in the data are filled to ensure a 
+            groups them into hourly observations (parallelized)
+        3. Cumulative max -- applies running cummax for perimeter mode
+        4. Imputation -- any gaps in the data are filled to ensure a 
             temporally resolved dataset
 
     To prevent maxing out on RAM, each frame is saved into an nc file.
@@ -192,30 +193,53 @@ def aggregate(
         fire_name (str): Name of the fire.
         is_perimeter (bool): Determines if the frames will be active fire 
             (frames stay as-is), or fire perimeter (cumulative max of frames).
+        max_workers (int): Number of threads for parallel downsampling.
 
     Returns:
         xr.Dataset: A dataset with the temporally downsampled dataset.
     '''
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     files_df = _read_csv(csv_path)
-    dataset_paths = []
     out_dir = Path(temp_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    running_cummax = None
-    for hour, hour_df in (
-        pbar := tqdm(files_df.groupby('timestamp'), disable=not verbose, leave=False, delay=1)
-    ):
-        pbar.set_description(f'Processing {hour}')
 
+    hourly_groups = list(files_df.groupby('timestamp'))
+
+    # Phase 1: Parallel downsample (open, remap, downsample, clean, save)
+    def _process_hour(hour, hour_df):
         ds = _open_and_combine_ds(
             goes_save_dir=goes_save_dir,
             goes_filepaths=hour_df['file'].to_list()
         )
-
         ds = map_fdc_mask_to_confidence(ds)
-
         ds = _downsample(ds, hour)
+        ds = _clean_ds(ds)
+        path = out_dir / Path(hour.isoformat() + '.nc')
+        ds.to_netcdf(str(path), mode="w", engine="scipy")
+        ds.close()
+        return path
 
-        if is_perimeter:
+    dataset_paths = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_process_hour, hour, hour_df): hour
+            for hour, hour_df in hourly_groups
+        }
+        with tqdm(total=len(futures), disable=not verbose, leave=False,
+                  delay=1, desc="Downsampling") as pbar:
+            for future in as_completed(futures):
+                dataset_paths.append(future.result())
+                pbar.update(1)
+
+    dataset_paths.sort()
+
+    # Phase 2: Sequential cummax (if perimeter mode)
+    if is_perimeter:
+        running_cummax = None
+        for path in tqdm(dataset_paths, disable=not verbose, leave=False,
+                         delay=1, desc="Applying cummax"):
+            ds = xr.open_dataset(str(path)).load()
             ds, running_cummax = _cummax(ds, data_var, running_cummax)
             ds = ds.assign_attrs(
                 fire_name=fire_name,
@@ -223,22 +247,22 @@ def aggregate(
                 description="Perimeter product, containing the cumulative max "
                 "of the confidences of the past active fire pixels"
             )
-        else:
+            ds.to_netcdf(str(path), mode="w", engine="scipy")
+            ds.close()
+    else:
+        # Just tag attributes for active fire mode
+        for path in dataset_paths:
+            ds = xr.open_dataset(str(path)).load()
             ds = ds.assign_attrs(
                 fire_name=fire_name,
                 active_fire="True",
-                description="Active fire product, containing the  "
+                description="Active fire product, containing the "
                 "the confidence of the current active fire pixels"
             )
+            ds.to_netcdf(str(path), mode="w", engine="scipy")
+            ds.close()
 
-        ds = _clean_ds(ds)
-
-        path = out_dir / Path(hour.isoformat() + '.nc')
-        ds = eval_and_save_nc(ds, path, data_var=data_var, verbose=False) 
-        ds.close()
-
-        dataset_paths.append(path)
-
+    # Phase 3: Combine and impute
     ds = xr.open_mfdataset(
         dataset_paths,
         combine='nested',
