@@ -82,7 +82,6 @@ def load_config(config_path: str) -> dict:
 
     # Defaults
     cfg.setdefault('clean', False)
-    cfg.setdefault('memory_limit', '50GB')
     cfg.setdefault('threads', 12)
     return cfg
 
@@ -233,7 +232,7 @@ def process_fire(
 
     # [1/6] Aggregate
     tqdm.write(S.step(1, 6, "Aggregating..."))
-    west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name)
+    west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name, cfg['threads'])
 
     # [2/6] Scale
     tqdm.write(S.step(2, 6, "Scaling early perimeters..."))
@@ -270,7 +269,7 @@ def process_fire(
 # --- Pipeline steps ---
 
 def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
-                   dates: pd.DatetimeIndex, fire_name: str):
+                   dates: pd.DatetimeIndex, fire_name: str, threads: int):
     """Remap, temporally downsample, and aggregate both satellites."""
     results = {}
     for sat in ['west', 'east']:
@@ -283,6 +282,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             dates=dates,
             fire_name=fire_name,
             verbose=True,
+            max_workers=threads,
         )
         ds = eval_and_save_nc(
             ds,
@@ -350,18 +350,21 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     """Composite East and West into a single dataset."""
+    import dask
+
     tqdm.write(S.substep("Compositing East and West..."))
     save_path = str(Path(netcdf_dir) / 'composited.nc')
     composite_ds = composite(west_ds, east_ds, dates, data_var='MaskConfidence')
     west_ds.close()
     east_ds.close()
-    composite_ds = eval_and_save_nc(
-        composite_ds,
-        save_path=save_path,
-        chunks='auto',
-        desc='compositing',
-        verbose=True,
-    )
+    with dask.config.set(scheduler='synchronous'):
+        composite_ds = eval_and_save_nc(
+            composite_ds,
+            save_path=save_path,
+            chunks='auto',
+            desc='compositing',
+            verbose=True,
+        )
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
 
@@ -471,19 +474,9 @@ def main():
     args = parse_args()
     cfg = load_config(args.config)
 
-    # Set up dask distributed scheduler with memory limit
-    from dask.distributed import Client, LocalCluster
-    cluster = LocalCluster(
-        n_workers=1,
-        threads_per_worker=cfg['threads'],
-        memory_limit=cfg['memory_limit'],
-    )
-    client = Client(cluster)
-
     manifest = load_manifest(cfg['manifest'])
     tqdm.write(f"Config: {args.config}")
     tqdm.write(f"Manifest: {len(manifest)} fire(s)")
-    tqdm.write(f"Memory limit: {cfg['memory_limit']}")
     tqdm.write(manifest.to_string(index=False))
     tqdm.write("")
 

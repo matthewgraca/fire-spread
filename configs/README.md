@@ -18,10 +18,7 @@ Options:
 - `clean`: Whether or not to delete the contents of the temp folder after processing. 
     - Example: `true`
     - Recommendation: Keep `true`, the intermediate files can get large.
-- `memory_limit`: String detailing the amount of memory you want allocated in RAM to run the GOFER pipeline. Dask will handle the rest.
-    - Example: `50GB`
-    - Recommendation: Your available RAM - 14GB
-- `threads`: Integer detailing the number of threads you want Dask to allocate to the job.
+- `threads`: Integer detailing the number of threads you want `ThreadPoolExecutor` to allocate to the job of subhourly merge into hourly netcdfs.
     - Example: `12`
-    - Recommendation: Your available threadcount // 2
-    - Note: Since this script is expected to have limited users, we didn't feel the need to automagically determine these parameters.
+    - Recommendation: Your available threadcount // 2, as Python/xarray overhead will be the limiter here, not I/O if you're cool and use an NVME drive here.
+    - Note: Since this script is expected to have limited users, we didn't feel the need to automagically determine this parameter.
