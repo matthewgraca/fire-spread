@@ -216,7 +216,8 @@ def aggregate(
         ds = _downsample(ds, hour)
         ds = _clean_ds(ds)
         path = out_dir / Path(hour.isoformat() + '.nc')
-        ds.to_netcdf(str(path), mode="w", engine="scipy")
+        encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
+        ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
         ds.close()
         return path
 
