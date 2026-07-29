@@ -288,7 +288,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             save_path=save_path,
             chunks='auto',
             desc=f'{sat} aggregation',
-            verbose=True,
+            verbose=False,
         )
         tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ds
@@ -358,7 +358,7 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
         save_path=save_path,
         chunks='auto',
         desc='compositing',
-        verbose=True,
+        verbose=False,
     )
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
@@ -426,7 +426,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         save_path=nc_path,
         chunks='auto',
         desc='final processing',
-        verbose=True,
+        verbose=False,
     )
     tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
