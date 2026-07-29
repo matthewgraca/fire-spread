@@ -120,7 +120,7 @@ def run_ingest(manifest: pd.DataFrame, calfire_gdf: gpd.GeoDataFrame, cfg: dict)
     for i, (_, fire_row) in enumerate(manifest.iterrows(), start=1):
         fire_name = fire_row['fire_name']
         fire_year = int(fire_row['year'])
-        fire_id = f"{fire_name.lower()}_{fire_year}"
+        fire_id = f"{fire_name.lower().replace(' ', '_')}_{fire_year}"
         temp_dir = str(Path(cfg['temp_dir']) / fire_id)
 
         tqdm.write(f"\n{S.fire_header(i, total, fire_name, fire_year)}")
