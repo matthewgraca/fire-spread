@@ -430,6 +430,21 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     return slice_path
 
 
+def _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals):
+    """Set up dimensions, coordinates, and MaskConfidence variable in an h5netcdf file."""
+    f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
+    f.create_variable('time', ('time',), data=time_vals.astype('int64'))
+    f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
+    f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+    mc_var = f.create_variable(
+        'MaskConfidence', ('time', 'latitude', 'longitude'),
+        dtype='int8', fillvalue=np.int8(-1),
+    )
+    mc_var.attrs['scale_factor'] = np.float32(0.01)
+    mc_var.attrs['add_offset'] = np.float32(0.0)
+    return mc_var
+
+
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     """Composite East and West into a single dataset, one time slice at a time."""
     import h5netcdf
@@ -446,17 +461,7 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     carried_attrs = {k: west_ds.attrs[k] for k in west_ds.attrs if k in keep_attrs}
 
     with h5netcdf.File(save_path, 'w') as f:
-        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
-        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
-        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
-        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
-        mc_var = f.create_variable(
-            'MaskConfidence', ('time', 'latitude', 'longitude'),
-            dtype='int8', fillvalue=np.int8(-1),
-        )
-        mc_var.attrs['scale_factor'] = np.float32(0.01)
-        mc_var.attrs['add_offset'] = np.float32(0.0)
-
+        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         for t in tqdm(range(n_times), desc="Compositing", leave=False, delay=1):
             west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
@@ -495,17 +500,7 @@ def step_smooth(ds, netcdf_dir: str):
 
     # Write directly to final file, one slice at a time
     with h5netcdf.File(save_path, 'w') as f:
-        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
-        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
-        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
-        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
-        mc_var = f.create_variable(
-            'MaskConfidence', ('time', 'latitude', 'longitude'),
-            dtype='int8', fillvalue=np.int8(-1),
-        )
-        mc_var.attrs['scale_factor'] = np.float32(0.01)
-        mc_var.attrs['add_offset'] = np.float32(0.0)
-
+        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         for t in tqdm(range(n_times), desc="Smoothing", leave=False, delay=1):
             ds_t = ds.isel(time=t).load().expand_dims('time')
@@ -558,16 +553,7 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     time_vals = trimmed_ds.time.values
 
     with h5netcdf.File(nc_path, 'w') as f:
-        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
-        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
-        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
-        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
-        mc_var = f.create_variable(
-            'MaskConfidence', ('time', 'latitude', 'longitude'),
-            dtype='int8', fillvalue=np.int8(-1),
-        )
-        mc_var.attrs['scale_factor'] = np.float32(0.01)
-        mc_var.attrs['add_offset'] = np.float32(0.0)
+        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         for t in tqdm(range(n_times), desc="Writing final", leave=False, delay=1):
             # Load, round, binarize one slice at a time
