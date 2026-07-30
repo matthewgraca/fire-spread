@@ -277,7 +277,7 @@ def process_fire(
     ].to_crs(epsg=4326)
     calfire_ref = calfire_ref if len(calfire_ref) > 0 else None
 
-    step_final(ds, fire_meta, out_dir, calfire_gdf=calfire_ref)
+    step_final(ds, fire_meta, netcdf_dir, out_dir, calfire_gdf=calfire_ref)
 
     # Cleanup intermediates
     if cfg['clean'] and Path(netcdf_dir).exists():
@@ -538,7 +538,7 @@ def step_smooth(ds, netcdf_dir: str):
     return smoothed_ds
 
 
-def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
+def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=None):
     """
     Final processing: round, binarize, trim, save netCDF, vectorize,
     save GeoJSON, and produce visualization.
