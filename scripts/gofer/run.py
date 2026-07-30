@@ -472,7 +472,7 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
         mc_var.attrs['add_offset'] = np.float32(0.0)
 
 
-        for t in range(n_times):
+        for t in tqdm(range(n_times), desc="Compositing", leave=False, delay=1):
             west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
             east_slice = east_ds['MaskConfidence'].isel(time=t).load().values
             merged = np.nanmean(
@@ -521,7 +521,7 @@ def step_smooth(ds, netcdf_dir: str):
         mc_var.attrs['add_offset'] = np.float32(0.0)
 
 
-        for t in range(n_times):
+        for t in tqdm(range(n_times), desc="Smoothing", leave=False, delay=1):
             ds_t = ds.isel(time=t).load().expand_dims('time')
             smoothed_t = smooth(ds_t, kernel_radius_m=1700)
             values = smoothed_t['MaskConfidence'].values[0]
@@ -597,7 +597,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         mc_var.attrs['scale_factor'] = np.float32(0.01)
         mc_var.attrs['add_offset'] = np.float32(0.0)
 
-        for t in range(n_times):
+        for t in tqdm(range(n_times), desc="Writing final", leave=False, delay=1):
             # Load, round, binarize one slice at a time
             slice_val = trimmed_ds['MaskConfidence'].isel(time=t).values
             slice_val = np.round(slice_val, 2)
