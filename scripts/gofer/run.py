@@ -523,10 +523,12 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     fire_year = fire_meta['fire_year']
     fire_id = f"{fire_name.lower()}_{fire_year}"
 
-    tqdm.write(S.substep("Rounding, binarizing, trimming...", last_step=True))
-    final_ds = round_to(ds, data_var='MaskConfidence', decimals=2)
+    tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
+    final_ds = trim_inactive_timesteps(ds, data_var='MaskConfidence')
+    ds.close()
+    gc.collect()
+    final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
     final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
-    final_ds = trim_inactive_timesteps(final_ds, data_var='MaskConfidence')
 
     # Attach metadata
     final_ds = final_ds.assign_attrs(
