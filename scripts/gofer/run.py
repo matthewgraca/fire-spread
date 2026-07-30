@@ -232,18 +232,9 @@ def process_fire(
             data['lat_max'] + BBOX_BUFFER,
         )
 
-    ### FIXME TEMPORARY SKIP OF AGGREGATE, REMOVE
-    '''
     # [1/6] Aggregate
     tqdm.write(S.step(1, 6, "Aggregating..."))
     west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name, cfg['workers'])
-
-    # [1/6] Aggregate (TEMP: skip, load from disk)
-    tqdm.write(S.step(1, 6, "Aggregating... (skipped, loading from disk)"))
-    west_ds = xr.open_dataset(f'{netcdf_dir}/west/aggregated.nc', chunks={'time': 1})
-    east_ds = xr.open_dataset(f'{netcdf_dir}/east/aggregated.nc', chunks={'time': 1})
-
-    ####
 
     # [2/6] Scale
     tqdm.write(S.step(2, 6, "Scaling early perimeters..."))
@@ -252,11 +243,6 @@ def process_fire(
     # [3/6] Ortho
     tqdm.write(S.step(3, 6, "Orthorectifying..."))
     west_ds, east_ds = step_ortho(west_ds, east_ds, dem, bbox, netcdf_dir, cfg['workers'])
-    '''
-    ### FIXME remove when done
-    west_ds = xr.open_dataset(f'{netcdf_dir}/west/ortho.nc', chunks={'time': 1})
-    east_ds = xr.open_dataset(f'{netcdf_dir}/east/ortho.nc', chunks={'time': 1})
-    ###
 
     # [4/6] Composite
     tqdm.write(S.step(4, 6, "Compositing..."))
@@ -545,14 +531,6 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     """
     from viz.gofer.fire_perimeter import plot_progression, plot_perimeter_comparison
 
-    ### FIXME remove after diagnosis
-    import psutil, sys                                                                
-    rss_gb = psutil.Process().memory_info().rss / 1024**3                             
-    tqdm.write(S.substep(f"RSS at step_final start: {rss_gb:.1f} GB", last_step=True))
-    sys.stdout.flush()                                                                
-    ###
-
-
     fire_name = fire_meta['fire_name']
     fire_year = fire_meta['fire_year']
     fire_id = f"{fire_name.lower()}_{fire_year}"
@@ -560,12 +538,6 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
     smoothed_path = str(Path(netcdf_dir) / 'smoothed.nc')
     first_fire, last_change = trim_inactive_timesteps(smoothed_path)
-
-    ### FIXME remove after diagnosis
-    rss_gb = psutil.Process().memory_info().rss / 1024**3
-    tqdm.write(S.substep(f"RSS after trim: {rss_gb:.1f} GB", last_step=True))
-    sys.stdout.flush()
-    ###
 
     # Save final netCDF — slice-by-slice to avoid loading entire dataset
     import h5netcdf
