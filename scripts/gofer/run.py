@@ -448,16 +448,18 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
         f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
         mc_var = f.create_variable(
             'MaskConfidence', ('time', 'latitude', 'longitude'),
-            dtype='float32', fillvalue=np.nan,
+            dtype='int8', fillvalue=np.int8(-1),
+            attrs={'scale_factor': np.float32(0.01), 'add_offset': np.float32(0.0)},
         )
 
         for t in range(n_times):
             west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
             east_slice = east_ds['MaskConfidence'].isel(time=t).load().values
-            mc_var[t, :, :] = np.nanmean(
+            merged = np.nanmean(
                 np.stack([west_slice, east_slice], axis=0), axis=0
             )
-            del west_slice, east_slice
+            mc_var[t, :, :] = np.clip(merged / 0.01, 0, 100).astype(np.int8)
+            del west_slice, east_slice, merged
 
         f.attrs['pipeline'] = 'composited'
         for k, v in carried_attrs.items():
@@ -493,14 +495,16 @@ def step_smooth(ds, netcdf_dir: str):
         f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
         mc_var = f.create_variable(
             'MaskConfidence', ('time', 'latitude', 'longitude'),
-            dtype='float32', fillvalue=np.nan,
+            dtype='int8', fillvalue=np.int8(-1),
+            attrs={'scale_factor': np.float32(0.01), 'add_offset': np.float32(0.0)},
         )
 
         for t in range(n_times):
             ds_t = ds.isel(time=t).load().expand_dims('time')
             smoothed_t = smooth(ds_t, kernel_radius_m=1700)
-            mc_var[t, :, :] = smoothed_t['MaskConfidence'].values[0]
-            del ds_t, smoothed_t
+            values = smoothed_t['MaskConfidence'].values[0]
+            mc_var[t, :, :] = np.clip(values / 0.01, 0, 100).astype(np.int8)
+            del ds_t, smoothed_t, values
 
         f.attrs['pipeline'] = 'smoothed'
 
