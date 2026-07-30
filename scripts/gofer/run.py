@@ -424,103 +424,86 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     """Composite East and West into a single dataset, one time slice at a time."""
+    import h5netcdf
+
     tqdm.write(S.substep("Compositing East and West..."))
     save_path = str(Path(netcdf_dir) / 'composited.nc')
 
-    # Process slice-by-slice to avoid loading both full datasets into RAM.
-    # For each timestep: read one west slice + one east slice, average, write.
-    out_dir = Path(netcdf_dir) / 'composite_slices'
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     n_times = west_ds.sizes['time']
-    slice_paths = []
-
-    for t in range(n_times):
-        west_slice = west_ds['MaskConfidence'].isel(time=t).load()
-        east_slice = east_ds['MaskConfidence'].isel(time=t).load()
-
-        merged = np.nanmean(
-            np.stack([west_slice.values, east_slice.values], axis=0),
-            axis=0
-        )
-
-        time_val = west_ds.time.values[t]
-        ds_slice = xr.Dataset(
-            data_vars={
-                'MaskConfidence': (['latitude', 'longitude'], merged),
-            },
-            coords={
-                'latitude': west_ds.latitude.values,
-                'longitude': west_ds.longitude.values,
-                'time': time_val,
-            },
-        )
-
-        slice_path = out_dir / f'{t:05d}.nc'
-        ds_slice.to_netcdf(str(slice_path), engine='scipy')
-        slice_paths.append(slice_path)
-
-        del west_slice, east_slice, merged, ds_slice
+    lat_vals = west_ds.latitude.values
+    lon_vals = west_ds.longitude.values
+    time_vals = west_ds.time.values
 
     keep_attrs = {'fire_name', 'description', 'active_fire', 'fire_perimeter'}
     carried_attrs = {k: west_ds.attrs[k] for k in west_ds.attrs if k in keep_attrs}
 
+    with h5netcdf.File(save_path, 'w') as f:
+        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
+        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
+        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
+        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+        mc_var = f.create_variable(
+            'MaskConfidence', ('time', 'latitude', 'longitude'),
+            dtype='float32', fillvalue=np.nan,
+        )
+
+        for t in range(n_times):
+            west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
+            east_slice = east_ds['MaskConfidence'].isel(time=t).load().values
+            mc_var[t, :, :] = np.nanmean(
+                np.stack([west_slice, east_slice], axis=0), axis=0
+            )
+            del west_slice, east_slice
+
+        f.attrs['pipeline'] = 'composited'
+        for k, v in carried_attrs.items():
+            f.attrs[k] = v
+
     west_ds.close()
     east_ds.close()
-
-    # Combine slices into final dataset
-    composite_ds = xr.open_mfdataset(
-        [str(p) for p in sorted(slice_paths)],
-        combine='nested',
-        concat_dim='time',
-        chunks={'time': 1},
-    )
-
-    composite_ds = composite_ds.assign_attrs(pipeline='composited', **carried_attrs)
-
-    composite_ds = eval_and_save_nc(
-        composite_ds,
-        save_path=save_path,
-        chunks={'time': 1},
-        desc='compositing',
-        verbose=True,
-    )
-
-    # Cleanup slice files
-    shutil.rmtree(out_dir)
     gc.collect()
 
+    composite_ds = xr.open_dataset(save_path, chunks={'time': 1})
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
 
 
 def step_smooth(ds, netcdf_dir: str):
-    """Apply spatial smoothing."""
-    import psutil
-    import sys
-
-    process = psutil.Process()
-    rss_gb = process.memory_info().rss / 1024**3
-    tqdm.write(S.substep(f"RSS before smooth: {rss_gb:.1f} GB"))
-
-    # Check for memory-mapped netCDF files still held
-    mmapped = [m.path for m in process.memory_maps() if '.nc' in m.path]
-    for m in mmapped:
-        tqdm.write(S.substep(f"  mmap: {m}"))
-    sys.stderr.flush()
-    sys.stdout.flush()
+    """Apply spatial smoothing, one time slice at a time."""
+    import h5netcdf
+    from gofer.spatial_smoothing import smooth
 
     tqdm.write(S.substep("Smoothing..."))
     save_path = str(Path(netcdf_dir) / 'smoothed.nc')
-    smoothed_ds = smooth(ds, kernel_radius_m=1700)
+
+    n_times = ds.sizes['time']
+    lat_vals = ds.latitude.values
+    lon_vals = ds.longitude.values
+    time_vals = ds.time.values
+
+    # Write directly to final file, one slice at a time
+    with h5netcdf.File(save_path, 'w') as f:
+        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
+        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
+        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
+        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+        mc_var = f.create_variable(
+            'MaskConfidence', ('time', 'latitude', 'longitude'),
+            dtype='float32', fillvalue=np.nan,
+        )
+
+        for t in range(n_times):
+            ds_t = ds.isel(time=t).load().expand_dims('time')
+            smoothed_t = smooth(ds_t, kernel_radius_m=1700)
+            mc_var[t, :, :] = smoothed_t['MaskConfidence'].values[0]
+            del ds_t, smoothed_t
+
+        f.attrs['pipeline'] = 'smoothed'
+
     ds.close()
-    smoothed_ds = eval_and_save_nc(
-        smoothed_ds,
-        save_path=save_path,
-        chunks='auto',
-        desc='smoothing',
-        verbose=True,
-    )
+    gc.collect()
+
+    smoothed_ds = xr.open_dataset(save_path, chunks={'time': 1})
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return smoothed_ds
 
