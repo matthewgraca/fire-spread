@@ -9,6 +9,7 @@ Usage:
     python scripts/gofer/run.py --config configs/gofer.yaml --skip-ingest
     python scripts/gofer/run.py --config configs/gofer.yaml --only-ingest
 """
+import sys
 import gc
 import pickle
 import shutil
@@ -231,9 +232,18 @@ def process_fire(
             data['lat_max'] + BBOX_BUFFER,
         )
 
+    ### FIXME TEMPORARY SKIP OF AGGREGATE, REMOVE
+    '''
     # [1/6] Aggregate
     tqdm.write(S.step(1, 6, "Aggregating..."))
     west_ds, east_ds = step_aggregate(cfg['goes_dir'], temp_dir, netcdf_dir, dates, fire_name, cfg['workers'])
+
+    # [1/6] Aggregate (TEMP: skip, load from disk)
+    tqdm.write(S.step(1, 6, "Aggregating... (skipped, loading from disk)"))
+    west_ds = xr.open_dataset(f'{netcdf_dir}/west/aggregated.nc', chunks={'time': 1})
+    east_ds = xr.open_dataset(f'{netcdf_dir}/east/aggregated.nc', chunks={'time': 1})
+
+    ####
 
     # [2/6] Scale
     tqdm.write(S.step(2, 6, "Scaling early perimeters..."))
@@ -242,17 +252,25 @@ def process_fire(
     # [3/6] Ortho
     tqdm.write(S.step(3, 6, "Orthorectifying..."))
     west_ds, east_ds = step_ortho(west_ds, east_ds, dem, bbox, netcdf_dir, cfg['workers'])
+    '''
+    ### FIXME remove when done
+    west_ds = xr.open_dataset(f'{netcdf_dir}/west/ortho.nc', chunks={'time': 1})
+    east_ds = xr.open_dataset(f'{netcdf_dir}/east/ortho.nc', chunks={'time': 1})
+    ###
 
     # [4/6] Composite
     tqdm.write(S.step(4, 6, "Compositing..."))
+    sys.stdout.flush()
     ds = step_composite(west_ds, east_ds, dates, netcdf_dir)
 
     # [5/6] Smooth
     tqdm.write(S.step(5, 6, "Smoothing..."))
+    sys.stdout.flush()
     ds = step_smooth(ds, netcdf_dir)
 
     # [6/6] Final
     tqdm.write(S.step(6, 6, "Final processing..."))
+    sys.stdout.flush()
     calfire_ref = calfire_gdf.loc[
         (calfire_gdf['FIRE_NAME'] == fire_name) &
         (calfire_gdf['YEAR_'] == fire_year)
@@ -449,8 +467,10 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
         mc_var = f.create_variable(
             'MaskConfidence', ('time', 'latitude', 'longitude'),
             dtype='int8', fillvalue=np.int8(-1),
-            attrs={'scale_factor': np.float32(0.01), 'add_offset': np.float32(0.0)},
         )
+        mc_var.attrs['scale_factor'] = np.float32(0.01)
+        mc_var.attrs['add_offset'] = np.float32(0.0)
+
 
         for t in range(n_times):
             west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
@@ -496,8 +516,10 @@ def step_smooth(ds, netcdf_dir: str):
         mc_var = f.create_variable(
             'MaskConfidence', ('time', 'latitude', 'longitude'),
             dtype='int8', fillvalue=np.int8(-1),
-            attrs={'scale_factor': np.float32(0.01), 'add_offset': np.float32(0.0)},
         )
+        mc_var.attrs['scale_factor'] = np.float32(0.01)
+        mc_var.attrs['add_offset'] = np.float32(0.0)
+
 
         for t in range(n_times):
             ds_t = ds.isel(time=t).load().expand_dims('time')
@@ -523,16 +545,31 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     """
     from viz.gofer.fire_perimeter import plot_progression, plot_perimeter_comparison
 
+    ### FIXME remove after diagnosis
+    import psutil, sys                                                                
+    rss_gb = psutil.Process().memory_info().rss / 1024**3                             
+    tqdm.write(S.substep(f"RSS at step_final start: {rss_gb:.1f} GB", last_step=True))
+    sys.stdout.flush()                                                                
+    ###
+
+
     fire_name = fire_meta['fire_name']
     fire_year = fire_meta['fire_year']
     fire_id = f"{fire_name.lower()}_{fire_year}"
 
     tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
     final_ds = trim_inactive_timesteps(ds, data_var='MaskConfidence')
+    final_ds = final_ds.load()
     ds.close()
     gc.collect()
     final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
     final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
+
+    ### FIXME remove after diagnosis
+    rss_gb = psutil.Process().memory_info().rss / 1024**3
+    tqdm.write(S.substep(f"RSS after trim: {rss_gb:.1f} GB", last_step=True))
+    sys.stdout.flush()
+    ###
 
     # Attach metadata
     final_ds = final_ds.assign_attrs(
