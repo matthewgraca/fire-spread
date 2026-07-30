@@ -558,9 +558,8 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     fire_id = f"{fire_name.lower()}_{fire_year}"
 
     tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
-    final_ds = trim_inactive_timesteps(ds, data_var='MaskConfidence')
-    final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
-    final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
+    smoothed_path = str(Path(netcdf_dir) / 'smoothed.nc')
+    first_fire, last_change = trim_inactive_timesteps(smoothed_path)
 
     ### FIXME remove after diagnosis
     rss_gb = psutil.Process().memory_info().rss / 1024**3
@@ -580,10 +579,11 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     images_dir.mkdir(parents=True, exist_ok=True)
 
     nc_path = str(datasets_dir / f'{fire_id}_gofer.nc')
-    n_times = final_ds.sizes['time']
-    lat_vals = final_ds.latitude.values
-    lon_vals = final_ds.longitude.values
-    time_vals = final_ds.time.values
+    trimmed_ds = ds.isel(time=slice(first_fire, last_change + 1))
+    n_times = trimmed_ds.sizes['time']
+    lat_vals = trimmed_ds.latitude.values
+    lon_vals = trimmed_ds.longitude.values
+    time_vals = trimmed_ds.time.values
 
     with h5netcdf.File(nc_path, 'w') as f:
         f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
@@ -598,7 +598,10 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         mc_var.attrs['add_offset'] = np.float32(0.0)
 
         for t in range(n_times):
-            slice_val = final_ds['MaskConfidence'].isel(time=t).values
+            # Load, round, binarize one slice at a time
+            slice_val = trimmed_ds['MaskConfidence'].isel(time=t).values
+            slice_val = np.round(slice_val, 2)
+            slice_val = np.where(slice_val < 0.95, 0.0, 1.0).astype(np.float32)
             mc_var[t, :, :] = np.clip(slice_val / 0.01, 0, 100).astype(np.int8)
             del slice_val
 
