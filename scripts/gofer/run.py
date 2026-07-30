@@ -559,9 +559,6 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
 
     tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
     final_ds = trim_inactive_timesteps(ds, data_var='MaskConfidence')
-    final_ds = final_ds.load()
-    ds.close()
-    gc.collect()
     final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
     final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
 
@@ -571,19 +568,8 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     sys.stdout.flush()
     ###
 
-    # Attach metadata
-    final_ds = final_ds.assign_attrs(
-        pipeline='gofer_final',
-        fire_name=fire_name,
-        fire_year=fire_year,
-        fire_acres=fire_meta['fire_acres'],
-        start_date=str(pd.Timestamp(final_ds.time.values[0])),
-        end_date=str(pd.Timestamp(final_ds.time.values[-1])),
-        lat_min=float(final_ds.latitude.min()),
-        lat_max=float(final_ds.latitude.max()),
-        lon_min=float(final_ds.longitude.min()),
-        lon_max=float(final_ds.longitude.max()),
-    )
+    # Save final netCDF — slice-by-slice to avoid loading entire dataset
+    import h5netcdf
 
     # Output subdirectories
     datasets_dir = Path(out_dir) / 'datasets'
@@ -593,15 +579,45 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
     vectors_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save final netCDF
     nc_path = str(datasets_dir / f'{fire_id}_gofer.nc')
-    final_ds = eval_and_save_nc(
-        final_ds,
-        save_path=nc_path,
-        chunks='auto',
-        desc='final processing',
-        verbose=True,
-    )
+    n_times = final_ds.sizes['time']
+    lat_vals = final_ds.latitude.values
+    lon_vals = final_ds.longitude.values
+    time_vals = final_ds.time.values
+
+    with h5netcdf.File(nc_path, 'w') as f:
+        f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
+        f.create_variable('time', ('time',), data=time_vals.astype('int64'))
+        f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
+        f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+        mc_var = f.create_variable(
+            'MaskConfidence', ('time', 'latitude', 'longitude'),
+            dtype='int8', fillvalue=np.int8(-1),
+        )
+        mc_var.attrs['scale_factor'] = np.float32(0.01)
+        mc_var.attrs['add_offset'] = np.float32(0.0)
+
+        for t in range(n_times):
+            slice_val = final_ds['MaskConfidence'].isel(time=t).values
+            mc_var[t, :, :] = np.clip(slice_val / 0.01, 0, 100).astype(np.int8)
+            del slice_val
+
+        # Attach metadata as global attrs
+        f.attrs['pipeline'] = 'gofer_final'
+        f.attrs['fire_name'] = fire_name
+        f.attrs['fire_year'] = str(fire_year)
+        f.attrs['fire_acres'] = str(fire_meta['fire_acres'])
+        f.attrs['start_date'] = str(pd.Timestamp(time_vals[0]))
+        f.attrs['end_date'] = str(pd.Timestamp(time_vals[-1]))
+        f.attrs['lat_min'] = str(float(lat_vals.min()))
+        f.attrs['lat_max'] = str(float(lat_vals.max()))
+        f.attrs['lon_min'] = str(float(lon_vals.min()))
+        f.attrs['lon_max'] = str(float(lon_vals.max()))
+
+    ds.close()
+    gc.collect()
+
+    final_ds = xr.open_dataset(nc_path, chunks={'time': 1})
     tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
     # Vectorize
