@@ -635,11 +635,13 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     # Visualization
     tqdm.write(S.substep("Generating visualization...", last_step=True))
     viz_path = str(images_dir / f'{fire_id}_progression.png')
+    viz_step = 12 if len(polygons) > 1000 else 1
     plot_progression(
         gofer_gdf=polygons,
         ds=final_ds,
         title=f"GOFER {fire_name} {fire_year} — Fire Progression",
         save_path=viz_path,
+        step=viz_step,
     )
     tqdm.write(S.substep(f"Saved: {viz_path}", last_step=True))
 

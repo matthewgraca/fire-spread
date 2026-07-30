@@ -93,6 +93,7 @@ def plot_progression(
     title: str = "GOFER Fire Progression",
     save_path: str = None,
     data_var: str = "MaskConfidence",
+    step: int = 1,
 ):
     """
     Plot GOFER perimeter progression with colored edges on a black
@@ -108,6 +109,7 @@ def plot_progression(
         title: Plot title.
         save_path: If provided, save the figure to this path.
         data_var: Name of the binary fire variable in ds.
+        step: Plot every Nth timestep. 1 = all, 12 = every 12th.
     """
     extent = _extent_from_ds(ds)
     fig, ax = _setup_basemap(extent)
@@ -115,6 +117,11 @@ def plot_progression(
 
     n = len(gofer_gdf)
     t95_idx = _t95_index(ds, data_var, n)
+
+    # Subsample indices
+    indices = list(range(0, n, step))
+    if indices[-1] != n - 1:
+        indices.append(n - 1)  # always include final perimeter
 
     # Black background: final perimeter
     gpd.GeoDataFrame([gofer_gdf.iloc[-1]], crs="EPSG:4326").plot(
@@ -128,7 +135,7 @@ def plot_progression(
     )
 
     # Draw late (large) perimeters first so early (small) ones sit on top
-    for idx in reversed(range(n)):
+    for idx in reversed(indices):
         row = gofer_gdf.iloc[idx]
         frac = min(idx / t95_idx, 1.0)
         color = cmap(frac)
