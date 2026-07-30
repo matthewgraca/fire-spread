@@ -147,7 +147,6 @@ def plot_progression(
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Saved to {save_path}")
 
     plt.close()
 
@@ -217,7 +216,6 @@ def plot_progression_filled(
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Saved to {save_path}")
 
     plt.close()
 
@@ -280,6 +278,5 @@ def plot_perimeter_comparison(
 
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Saved to {save_path}")
 
     plt.close()
