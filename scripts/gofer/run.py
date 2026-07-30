@@ -240,7 +240,7 @@ def process_fire(
 
     # [3/6] Ortho
     tqdm.write(S.step(3, 6, "Orthorectifying..."))
-    west_ds, east_ds = step_ortho(west_ds, east_ds, dem, bbox, netcdf_dir)
+    west_ds, east_ds = step_ortho(west_ds, east_ds, dem, bbox, netcdf_dir, cfg['workers'])
 
     # [4/6] Composite
     tqdm.write(S.step(4, 6, "Compositing..."))
@@ -323,19 +323,59 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
     return results['west'], results['east']
 
 
-def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str):
-    """Orthorectify both satellite datasets."""
+def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str, max_workers: int = 12):
+    """Orthorectify both satellite datasets using parallel workers."""
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from gofer.ortho import make_ortho_map
+
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
         tqdm.write(S.substep(f"Orthorectifying GOES-{sat.capitalize()}..."))
         save_path = str(Path(netcdf_dir) / sat / 'ortho.nc')
-        ortho_ds = orthorectify(
-            ds,
+
+        # Build the ortho map once
+        ortho_map = make_ortho_map(
+            goes_ds=ds,
             dem_filepath=dem_filepath,
             bbox=bbox,
-            data_var="MaskConfidence",
         )
+
+        # Save ortho map for worker processes
+        slice_dir = Path(netcdf_dir) / sat / 'ortho_slices'
+        slice_dir.mkdir(parents=True, exist_ok=True)
+        ortho_map_path = str(slice_dir / 'ortho_map.nc')
+        encoding = {v: {'dtype': 'float64'} for v in ortho_map.coords
+                    if ortho_map.coords[v].dtype.kind == 'f'}
+        ortho_map.to_netcdf(ortho_map_path, engine='scipy', encoding=encoding)
+
+        source_path = str(Path(netcdf_dir) / sat / 'scaled.nc')
+        n_times = ds.sizes['time']
         ds.close()
+
+        # Parallel orthorectification
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    _ortho_slice, source_path, ortho_map_path, t, str(slice_dir)
+                ): t
+                for t in range(n_times)
+            }
+            slice_paths = [None] * n_times
+            with tqdm(total=n_times, desc=f"Orthorectifying {sat}",
+                      leave=False, delay=1) as pbar:
+                for future in as_completed(futures):
+                    t = futures[future]
+                    slice_paths[t] = future.result()
+                    pbar.update(1)
+
+        # Combine into final ortho file
+        ortho_ds = xr.open_mfdataset(
+            slice_paths,
+            combine='nested',
+            data_vars='all',
+            concat_dim='time',
+            chunks={'time': 1},
+        )
         ortho_ds = eval_and_save_nc(
             ortho_ds,
             save_path=save_path,
@@ -343,9 +383,40 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             desc=f'{sat} orthorectification',
             verbose=True,
         )
+
+        import shutil
+        shutil.rmtree(slice_dir)
+
         tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ortho_ds
     return results['west'], results['east']
+
+
+def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) -> str:
+    """Orthorectify a single time slice. Runs in a worker process."""
+    import xarray as xr
+    from gofer.ortho import apply_ortho_map
+
+    ortho_map = xr.open_dataset(ortho_map_path)
+    ds = xr.open_dataset(source_path)
+    ds_t = ds.isel(time=t).load()
+    ds.close()
+
+    ortho_t = apply_ortho_map(
+        ds_t.expand_dims('time'),
+        ortho_map,
+        data_var="MaskConfidence",
+    )
+
+    slice_path = f"{out_dir}/{t:05d}.nc"
+    encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
+                if ortho_t.coords[name].dtype.kind == 'f'}
+    encoding['MaskConfidence'] = {'dtype': 'float32'}
+    ortho_t.to_netcdf(slice_path, engine='scipy', encoding=encoding)
+    ortho_t.close()
+    ortho_map.close()
+
+    return slice_path
 
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
@@ -504,6 +575,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
         title=f"GOFER {fire_name} {fire_year} — Fire Progression",
         save_path=viz_path,
     )
+    tqdm.write(S.substep(f"Saved: {viz_path}", last_step=True))
 
     # Comparison visualization: GOFER vs FRAP final perimeters
     if calfire_gdf is not None:
@@ -516,6 +588,7 @@ def step_final(ds, fire_meta: dict, out_dir: str, calfire_gdf=None):
             title=f"GOFER vs FRAP — {fire_name} {fire_year}",
             save_path=comparison_path,
         )
+    tqdm.write(S.substep(f"Saved: {comparison_path}", last_step=True))
 
     return final_ds, polygons
 
