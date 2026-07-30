@@ -533,7 +533,7 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
 
     fire_name = fire_meta['fire_name']
     fire_year = fire_meta['fire_year']
-    fire_id = f"{fire_name.lower()}_{fire_year}"
+    fire_id = f"{fire_name.lower().replace(' ', '_')}_{fire_year}"
 
     tqdm.write(S.substep("Trimming, rounding, binarizing...", last_step=True))
     smoothed_path = str(Path(netcdf_dir) / 'smoothed.nc')
