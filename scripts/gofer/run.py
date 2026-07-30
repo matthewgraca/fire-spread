@@ -9,6 +9,7 @@ Usage:
     python scripts/gofer/run.py --config configs/gofer.yaml --skip-ingest
     python scripts/gofer/run.py --config configs/gofer.yaml --only-ingest
 """
+import gc
 import pickle
 import shutil
 import time
@@ -320,6 +321,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         )
         tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = scaled_ds
+        gc.collect()
     return results['west'], results['east']
 
 
@@ -384,8 +386,8 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             verbose=True,
         )
 
-        import shutil
         shutil.rmtree(slice_dir)
+        gc.collect()
 
         tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ortho_ds
@@ -484,8 +486,8 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     )
 
     # Cleanup slice files
-    import shutil
     shutil.rmtree(out_dir)
+    gc.collect()
 
     tqdm.write(S.substep(f"Saved to {save_path}"))
     return composite_ds
@@ -493,6 +495,8 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
 
 def step_smooth(ds, netcdf_dir: str):
     """Apply spatial smoothing."""
+    import psutil
+    tqdm.write(S.substep(f"RSS before smooth: {psutil.Process().memory_info().rss / 1024**3:.1f} GB"))
     tqdm.write(S.substep("Smoothing..."))
     save_path = str(Path(netcdf_dir) / 'smoothed.nc')
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
