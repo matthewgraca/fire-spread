@@ -48,7 +48,29 @@ class TestTrimInactiveTimesteps(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.ds = _make_perimeter_ds(n_times=10)
-        cls.trimmed = trim_inactive_timesteps(cls.ds)
+
+        # trim_inactive_timesteps expects a filepath, so write to a temp file
+        # using the same int8 packed encoding the pipeline uses
+        import tempfile, os
+        cls._tmpdir = tempfile.mkdtemp()
+        cls._filepath = os.path.join(cls._tmpdir, 'test_trim.nc')
+        encoding = {
+            'MaskConfidence': {
+                'dtype': 'int8',
+                'scale_factor': np.float32(0.01),
+                'add_offset': np.float32(0.0),
+                '_FillValue': np.int8(-1),
+            }
+        }
+        cls.ds.to_netcdf(cls._filepath, encoding=encoding)
+
+        first_fire, last_change = trim_inactive_timesteps(cls._filepath)
+        cls.trimmed = cls.ds.isel(time=slice(first_fire, last_change + 1))
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        shutil.rmtree(cls._tmpdir, ignore_errors=True)
 
     def test_first_frame_has_fire(self):
         """After trimming, the first frame should contain fire pixels."""
