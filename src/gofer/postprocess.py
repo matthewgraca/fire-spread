@@ -6,44 +6,50 @@ import numpy as np
 
 
 def trim_inactive_timesteps(
-    ds: xr.Dataset,
+    filepath: str,
     data_var: str = 'MaskConfidence'
-) -> xr.Dataset:
+) -> tuple[int, int]:
     """
-    Trim leading timesteps with no fire detected and trailing timesteps
-    where the perimeter has stopped growing.
+    Find the bounds of the active fire period by reading the file directly
+    with h5py to avoid HDF5 chunk cache accumulation.
 
-    Since the product is a cumulative max, trailing frames that are identical
-    to their predecessor contain no new information.
+    Returns (first_fire, last_change) indices for slicing.
 
     Args:
-        ds: Dataset with a time dimension and a binary fire variable.
+        filepath: Path to the netCDF file to scan.
         data_var: Name of the data variable to check.
 
     Returns:
-        Dataset trimmed to the active fire period.
+        Tuple of (first_fire_index, last_change_index) inclusive.
     """
-    n_times = ds.sizes['time']
+    import h5py
 
-    # Trim leading: find first timestep with any fire pixels
-    first_fire = 0
-    for t in range(n_times):
-        slice_t = ds[data_var].isel(time=t).values
-        if slice_t.any():
-            first_fire = t
-            break
+    with h5py.File(filepath, 'r') as f:
+        mc = f[data_var]
+        n_times = mc.shape[0]
 
-    # Trim trailing: walk backward until we find a frame that differs
-    last_change = n_times - 1
-    prev_slice = ds[data_var].isel(time=n_times - 1).values
-    for t in range(n_times - 2, first_fire - 1, -1):
-        curr_slice = ds[data_var].isel(time=t).values
-        if not np.allclose(curr_slice, prev_slice, atol=0.01):
-            last_change = t + 1
-            break
-        prev_slice = curr_slice
+        # Raw int8 values: tolerance of 1 accounts for encoding/decoding
+        # rounding errors (1 unit = 0.01 in decoded space)
+        atol = 1
 
-    return ds.isel(time=slice(first_fire, last_change + 1))
+        # Trim leading: find first timestep with any fire pixels
+        first_fire = 0
+        for t in range(n_times):
+            if np.any(mc[t][:] > atol):
+                first_fire = t
+                break
+
+        # Trim trailing: walk backward until we find a frame that differs
+        last_change = n_times - 1
+        prev_slice = mc[n_times - 1][:]
+        for t in range(n_times - 2, first_fire - 1, -1):
+            curr_slice = mc[t][:]
+            if not np.allclose(curr_slice, prev_slice, atol=atol):
+                last_change = t + 1
+                break
+            prev_slice = curr_slice
+
+    return first_fire, last_change
 
 
 def round_to(
