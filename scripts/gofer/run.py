@@ -397,6 +397,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
 def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) -> str:
     """Orthorectify a single time slice. Runs in a worker process."""
     import xarray as xr
+    import numpy as np
     from gofer.ortho import apply_ortho_map
     from gofer.goes_utils import MC_ENCODING
 
@@ -410,6 +411,9 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
         ortho_map,
         data_var="MaskConfidence",
     )
+
+    # Only keep MaskConfidence — drop static geometry variables
+    ortho_t = ortho_t[['MaskConfidence']]
 
     slice_path = f"{out_dir}/{t:05d}.nc"
     encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
