@@ -346,7 +346,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
         slice_dir = Path(netcdf_dir) / sat / 'ortho_slices'
         slice_dir.mkdir(parents=True, exist_ok=True)
         ortho_map_path = str(slice_dir / 'ortho_map.nc')
-        encoding = {v: {'dtype': 'float64'} for v in ortho_map.coords
+        encoding = {v: {'dtype': 'float32'} for v in ortho_map.coords
                     if ortho_map.coords[v].dtype.kind == 'f'}
         ortho_map.to_netcdf(ortho_map_path, engine='scipy', encoding=encoding)
 
@@ -496,7 +496,19 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
 def step_smooth(ds, netcdf_dir: str):
     """Apply spatial smoothing."""
     import psutil
-    tqdm.write(S.substep(f"RSS before smooth: {psutil.Process().memory_info().rss / 1024**3:.1f} GB"))
+    import sys
+
+    process = psutil.Process()
+    rss_gb = process.memory_info().rss / 1024**3
+    tqdm.write(S.substep(f"RSS before smooth: {rss_gb:.1f} GB"))
+
+    # Check for memory-mapped netCDF files still held
+    mmapped = [m.path for m in process.memory_maps() if '.nc' in m.path]
+    for m in mmapped:
+        tqdm.write(S.substep(f"  mmap: {m}"))
+    sys.stderr.flush()
+    sys.stdout.flush()
+
     tqdm.write(S.substep("Smoothing..."))
     save_path = str(Path(netcdf_dir) / 'smoothed.nc')
     smoothed_ds = smooth(ds, kernel_radius_m=1700)
