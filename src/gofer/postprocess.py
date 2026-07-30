@@ -23,20 +23,25 @@ def trim_inactive_timesteps(
     Returns:
         Dataset trimmed to the active fire period.
     """
-    da = ds[data_var]
+    n_times = ds.sizes['time']
 
     # Trim leading: find first timestep with any fire pixels
-    has_fire = da.any(dim=['latitude', 'longitude'])
-    first_fire = int(has_fire.argmax(dim='time'))
+    first_fire = 0
+    for t in range(n_times):
+        slice_t = ds[data_var].isel(time=t).values
+        if slice_t.any():
+            first_fire = t
+            break
 
     # Trim trailing: walk backward until we find a frame that differs
-    # from the one before it
-    last_change = len(da.time) - 1
-    for t in range(len(da.time) - 1, 0, -1):
-        diff = (da.isel(time=t) != da.isel(time=t - 1)).any().compute()
-        if diff:
-            last_change = t
+    last_change = n_times - 1
+    prev_slice = ds[data_var].isel(time=n_times - 1).values
+    for t in range(n_times - 2, first_fire - 1, -1):
+        curr_slice = ds[data_var].isel(time=t).values
+        if not np.allclose(curr_slice, prev_slice, atol=0.01):
+            last_change = t + 1
             break
+        prev_slice = curr_slice
 
     return ds.isel(time=slice(first_fire, last_change + 1))
 
