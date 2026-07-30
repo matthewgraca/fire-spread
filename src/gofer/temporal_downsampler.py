@@ -159,6 +159,8 @@ def _clean_ds(
 
 def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: str) -> str:
     """Process a single hour: open, remap, downsample, clean, save."""
+    from gofer.goes_utils import MC_ENCODING
+
     ds = _open_and_combine_ds(
         goes_save_dir=goes_save_dir,
         goes_filepaths=goes_filepaths
@@ -168,6 +170,7 @@ def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: 
     ds = _clean_ds(ds)
     path = Path(out_dir) / Path(hour.isoformat() + '.nc')
     encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
+    encoding['MaskConfidence'] = MC_ENCODING
     ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
     ds.close()
     return str(path)
@@ -240,6 +243,9 @@ def aggregate(
     dataset_paths.sort()
 
     # Phase 2: Sequential cummax (if perimeter mode)
+    from gofer.goes_utils import MC_ENCODING
+    _mc_encoding = {'MaskConfidence': MC_ENCODING}
+
     if is_perimeter:
         running_cummax = None
         for path in tqdm(dataset_paths, disable=not verbose, leave=False,
@@ -252,7 +258,7 @@ def aggregate(
                 description="Perimeter product, containing the cumulative max "
                 "of the confidences of the past active fire pixels"
             )
-            ds.to_netcdf(str(path), mode="w", engine="scipy")
+            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_mc_encoding)
             ds.close()
     else:
         # Just tag attributes for active fire mode
@@ -264,7 +270,7 @@ def aggregate(
                 description="Active fire product, containing the "
                 "the confidence of the current active fire pixels"
             )
-            ds.to_netcdf(str(path), mode="w", engine="scipy")
+            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_mc_encoding)
             ds.close()
 
     # Phase 3: Combine and impute

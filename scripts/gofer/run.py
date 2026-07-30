@@ -398,6 +398,7 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     """Orthorectify a single time slice. Runs in a worker process."""
     import xarray as xr
     from gofer.ortho import apply_ortho_map
+    from gofer.goes_utils import MC_ENCODING
 
     ortho_map = xr.open_dataset(ortho_map_path)
     ds = xr.open_dataset(source_path)
@@ -413,7 +414,7 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     slice_path = f"{out_dir}/{t:05d}.nc"
     encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
                 if ortho_t.coords[name].dtype.kind == 'f'}
-    encoding['MaskConfidence'] = {'dtype': 'float32'}
+    encoding['MaskConfidence'] = MC_ENCODING
     ortho_t.to_netcdf(slice_path, engine='scipy', encoding=encoding)
     ortho_t.close()
     ortho_map.close()

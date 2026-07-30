@@ -7,6 +7,13 @@ from tqdm.dask import TqdmCallback
 
 GRS80_ECCENTRICITY = 0.0818191910435
 
+MC_ENCODING = {
+    'dtype': 'int8',
+    'scale_factor': np.float32(0.01),
+    'add_offset': np.float32(0.0),
+    '_FillValue': np.int8(-1),
+}
+
 # Operational date ranges for each GOES satellite on AWS S3.
 # Each entry maps a bucket name to (position, start_date, end_date).
 # end_date of None means the satellite is still active.
