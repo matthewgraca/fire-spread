@@ -312,13 +312,27 @@ def main():
         final_ds = smoothed_ds
         final_ds = round_to(final_ds, data_var='MaskConfidence', decimals=2)
         final_ds = binarize(final_ds, data_var='MaskConfidence', threshold=0.95)
-        final_ds = trim_inactive_timesteps(final_ds, data_var='MaskConfidence')
-        final_ds = final_ds.assign_attrs(pipeline='final processing')
+
+        # Save before trimming — trim_inactive_timesteps reads the file directly
+        save_path = f'out/{args.fire}_{args.year}_gofer.nc'
         final_ds = eval_and_save_nc(
             final_ds,
-            save_path=f'out/{args.fire}_{args.year}_gofer.nc',
+            save_path=save_path,
             chunks='auto',
-            desc='final processing (rounding, binarizing confidence, trimming)'
+            desc='final processing (rounding, binarizing confidence)'
+        )
+
+        # Trim inactive leading/trailing timesteps
+        first_fire, last_change = trim_inactive_timesteps(save_path)
+        final_ds = final_ds.isel(time=slice(first_fire, last_change + 1))
+        final_ds = final_ds.assign_attrs(pipeline='final processing')
+
+        # Re-save the trimmed result
+        final_ds = eval_and_save_nc(
+            final_ds,
+            save_path=save_path,
+            chunks='auto',
+            desc='trimming inactive timesteps'
         )
         print(final_ds)
         polygons = raster_to_polygon(final_ds, data_var='MaskConfidence', simplify_factor=2.0)

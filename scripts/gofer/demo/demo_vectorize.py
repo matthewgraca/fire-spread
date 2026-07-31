@@ -1,6 +1,5 @@
 """
-Demo: vectorize a GOFER output netCDF and plot the resulting polygon(s)
-against the CalFire reference perimeter, with a streetmap basemap.
+Demo: vectorize a GOFER output netCDF and plot the resulting polygon(s).
 
 Supports multi-timestep datasets, plotting early perimeters in blue
 through late perimeters in red, with early perimeters drawn on top.
@@ -9,7 +8,7 @@ Color is normalized to 95% of total burned area, matching the paper.
 import xarray as xr
 import geopandas as gpd
 from gofer.vectorize import raster_to_polygon
-from viz.gofer.fire_perimeter import plot_perimeter
+from viz.gofer.fire_perimeter import plot_progression, plot_perimeter_comparison
 
 
 if __name__ == "__main__":
@@ -18,9 +17,8 @@ if __name__ == "__main__":
     print(ds)
 
     # Vectorize
-    gofer_gdf = raster_to_polygon(ds)
+    gofer_gdf = raster_to_polygon(ds, data_var='MaskConfidence', simplify_factor=2.0)
     print(gofer_gdf)
-    print(f"Simplification applied with factor=2.0")
     print(f"Number of perimeters: {len(gofer_gdf)}")
 
     # Load CalFire reference
@@ -29,30 +27,19 @@ if __name__ == "__main__":
     )
     bobcat_ref = calfire.loc[calfire['FIRE_NAME'] == 'BOBCAT'].to_crs(epsg=4326)
 
-    # Derive extent from the dataset
-    buffer = 0.05
-    extent = [
-        float(ds.longitude.min()) - buffer,
-        float(ds.longitude.max()) + buffer,
-        float(ds.latitude.min()) - buffer,
-        float(ds.latitude.max()) + buffer,
-    ]
+    # Plot progression (colored edges, paper style)
+    plot_progression(
+        gofer_gdf=gofer_gdf,
+        ds=ds,
+        title="GOFER Bobcat 2020 — Fire Progression",
+        save_path="out/gofer/bobcat_progression.png",
+    )
 
-    # Plot
-    plot_perimeter(
+    # Plot comparison against CalFire reference perimeter
+    plot_perimeter_comparison(
         gofer_gdf=gofer_gdf,
         ds=ds,
         calfire_gdf=bobcat_ref,
-        extent=extent,
-        title="GOFER Bobcat 2020 — Fire Progression",
-        save_path="out/gofer/bobcat_polygon.png",
-    )
-
-    plot_perimeter(
-        gofer_gdf=gofer_gdf,
-        ds=ds,
-        calfire_gdf=None,
-        extent=extent,
-        title="GOFER Bobcat 2020 — Fire Progression",
-        save_path="out/gofer/bobcat_polygon_paper.png",
+        title="GOFER vs FRAP — Bobcat 2020",
+        save_path="out/gofer/bobcat_comparison.png",
     )
