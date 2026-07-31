@@ -654,6 +654,26 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     final_ds = xr.open_dataset(nc_path, chunks={'time': 1})
     tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
+    # Compute fire metrics
+    # fline_r, fspread_mae, fspread_awe always computed from MaskConfidence.
+    # fline_c computed automatically since ActiveFireConfidence is present.
+    tqdm.write(S.substep("Computing fire metrics...", last_step=True))
+    from gofer.metrics import compute_metrics
+    metrics_ds = compute_metrics(final_ds.load())
+    final_ds.close()
+
+    # Merge metrics into the final dataset and re-save
+    final_ds = xr.open_dataset(nc_path)
+    for var in metrics_ds.data_vars:
+        final_ds = final_ds.assign(**{var: metrics_ds[var]})
+
+    final_ds.to_netcdf(nc_path, mode='w', engine='h5netcdf')
+    final_ds.close()
+    final_ds = xr.open_dataset(nc_path, chunks={'time': 1})
+
+    metric_names = ', '.join(metrics_ds.data_vars)
+    tqdm.write(S.substep(f"Metrics added: {metric_names}", last_step=True))
+
     # Vectorize
     tqdm.write(S.substep("Vectorizing...", last_step=True))
     polygons = raster_to_polygon(final_ds, data_var='MaskConfidence', simplify_factor=2.0)
