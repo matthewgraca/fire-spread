@@ -7,6 +7,34 @@ from tqdm.dask import TqdmCallback
 
 GRS80_ECCENTRICITY = 0.0818191910435
 
+
+def estimate_pixel_size_m(ds: xr.Dataset) -> tuple[float, float]:
+    """
+    Estimate approximate pixel height and width in meters from a regular
+    latitude/longitude grid.
+
+    Args:
+        ds: Dataset with 'latitude' and 'longitude' coordinate arrays.
+
+    Returns:
+        (pixel_height_m, pixel_width_m)
+    """
+    lat = ds["latitude"].values
+    lon = ds["longitude"].values
+
+    dlat = abs(float(np.nanmedian(np.diff(lat))))
+    dlon = abs(float(np.nanmedian(np.diff(lon))))
+
+    mean_lat = float(np.nanmean(lat))
+
+    meters_per_degree_lat = 111_320
+    meters_per_degree_lon = 111_320 * np.cos(np.deg2rad(mean_lat))
+
+    pixel_height_m = dlat * meters_per_degree_lat
+    pixel_width_m = dlon * meters_per_degree_lon
+
+    return pixel_height_m, pixel_width_m
+
 MC_ENCODING = {
     'dtype': 'int8',
     'scale_factor': np.float32(0.01),

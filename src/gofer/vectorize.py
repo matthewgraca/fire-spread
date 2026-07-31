@@ -8,7 +8,7 @@ import rasterio.transform
 from shapely.geometry import shape
 from rasterio.features import shapes
 
-from gofer.spatial_smoothing import estimate_pixel_size_m
+from gofer.goes_utils import estimate_pixel_size_m
 
 
 def _get_transform(lon: np.ndarray, lat: np.ndarray):

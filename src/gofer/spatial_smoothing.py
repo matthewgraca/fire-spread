@@ -7,29 +7,7 @@ import xarray as xr
 from scipy.ndimage import uniform_filter
 import time
 
-
-def estimate_pixel_size_m(ds: xr.Dataset) -> tuple[float, float]:
-    """
-    Since we expect a grid of values, we will need to estimate approximate 
-    height and width in meters from latitude/longitude for each pixel
-
-    Assumes regular lat/lon grid.
-    """
-    lat = ds["latitude"].values
-    lon = ds["longitude"].values
-
-    dlat = abs(np.nanmedian(np.diff(lat)))
-    dlon = abs(np.nanmedian(np.diff(lon)))
-
-    mean_lat = float(np.nanmean(lat))
-
-    meters_per_degree_lat = 111_320
-    meters_per_degree_lon = 111_320 * np.cos(np.deg2rad(mean_lat))
-
-    pixel_height_m = dlat * meters_per_degree_lat
-    pixel_width_m = dlon * meters_per_degree_lon
-
-    return pixel_height_m, pixel_width_m
+from gofer.goes_utils import estimate_pixel_size_m
 
 
 def _kernel_size_from_meters(ds: xr.Dataset, kernel_width_m: float) -> int:
@@ -99,16 +77,12 @@ def smooth_displacement(
     Returns:
         Tuple of (smoothed_abi_x, smoothed_abi_y).
     """
-    # Estimate pixel size from the lat/lon grid
-    dlat = abs(np.nanmedian(np.diff(lat)))
-    dlon = abs(np.nanmedian(np.diff(lon)))
-    mean_lat = float(np.nanmean(lat))
-
-    meters_per_degree_lat = 111_320
-    meters_per_degree_lon = 111_320 * np.cos(np.deg2rad(mean_lat))
-
-    pixel_height_m = dlat * meters_per_degree_lat
-    pixel_width_m = dlon * meters_per_degree_lon
+    # Build a minimal dataset to reuse estimate_pixel_size_m
+    dummy_ds = xr.Dataset(coords={
+        "latitude": ("latitude", lat),
+        "longitude": ("longitude", lon),
+    })
+    pixel_height_m, pixel_width_m = estimate_pixel_size_m(dummy_ds)
     nominal_pixel_size_m = np.sqrt(pixel_height_m * pixel_width_m)
 
     kernel_size = int(round((kernel_radius_m * 2) / nominal_pixel_size_m))
