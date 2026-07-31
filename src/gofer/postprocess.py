@@ -77,4 +77,20 @@ def binarize(
         )}
     )
 
+
+def enforce_cummax(
+    ds: xr.Dataset,
+    data_var: str = 'MaskConfidence'
+) -> xr.Dataset:
+    """
+    Enforces cumulative maximum along the time dimension.
+
+    After compositing, early perimeter adjustment, smoothing, and binarization,
+    the monotonicity of the perimeter product is not guaranteed. This function
+    re-applies cummax to ensure each pixel is non-decreasing over time.
+    """
+    data = ds[data_var].values  # (time, lat, lon)
+    np.maximum.accumulate(data, axis=0, out=data)
+    return ds.assign(**{data_var: (ds[data_var].dims, data)})
+
                      

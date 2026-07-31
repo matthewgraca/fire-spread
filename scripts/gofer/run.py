@@ -555,11 +555,19 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     with h5netcdf.File(nc_path, 'w') as f:
         mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
+        running_max = None
         for t in tqdm(range(n_times), desc="Writing final", leave=False, delay=1):
             # Load, round, binarize one slice at a time
             slice_val = trimmed_ds['MaskConfidence'].isel(time=t).values
             slice_val = np.round(slice_val, 2)
             slice_val = np.where(slice_val < 0.95, 0.0, 1.0).astype(np.float32)
+            # Enforce cumulative max after binarization to guarantee
+            # non-decreasing perimeters across time
+            if running_max is None:
+                running_max = slice_val.copy()
+            else:
+                np.maximum(running_max, slice_val, out=running_max)
+                slice_val = running_max.copy()
             mc_var[t, :, :] = np.clip(slice_val / 0.01, 0, 100).astype(np.int8)
             del slice_val
 
