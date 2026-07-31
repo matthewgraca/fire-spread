@@ -294,6 +294,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             chunk_size=(1, 1500, 2500),
             save_path=save_path,
             chunks='auto',
+            data_var=['MaskConfidence', 'ActiveFireConfidence'],
             desc=f'{sat} aggregation',
             verbose=True,
         )
@@ -303,7 +304,11 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
 
 
 def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str):
-    """Compute and apply early perimeter scaling factors."""
+    """Compute and apply early perimeter scaling factors.
+
+    Only MaskConfidence is scaled — ActiveFireConfidence represents
+    instantaneous detections and should not be inflated.
+    """
     results = {}
     for sat, ds in [('west', west_ds), ('east', east_ds)]:
         tqdm.write(S.substep(f"Scaling GOES-{sat.capitalize()}..."))
@@ -320,6 +325,7 @@ def step_scale(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             chunk_size=(1, 1500, 2500),
             save_path=save_path,
             chunks={'time': 1},
+            data_var=['MaskConfidence', 'ActiveFireConfidence'],
             desc=f'{sat} scaling',
             verbose=True,
         )
@@ -386,6 +392,7 @@ def step_ortho(west_ds, east_ds, dem_filepath: str, bbox: tuple, netcdf_dir: str
             ortho_ds,
             save_path=save_path,
             chunks={'time': 1},
+            data_var=['MaskConfidence', 'ActiveFireConfidence'],
             desc=f'{sat} orthorectification',
             verbose=True,
         )
@@ -403,12 +410,16 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     import xarray as xr
     import numpy as np
     from gofer.ortho import apply_ortho_map
-    from gofer.goes_utils import MC_ENCODING
+    from gofer.goes_utils import MC_ENCODING, AFC_ENCODING
 
     ortho_map = xr.open_dataset(ortho_map_path)
     ds = xr.open_dataset(source_path)
     ds_t = ds.isel(time=t).load()
     ds.close()
+
+    # Orthorectify both variables using the same map
+    data_vars_to_ortho = [v for v in ['MaskConfidence', 'ActiveFireConfidence']
+                          if v in ds_t.data_vars]
 
     ortho_t = apply_ortho_map(
         ds_t.expand_dims('time'),
@@ -416,13 +427,24 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
         data_var="MaskConfidence",
     )
 
-    # Only keep MaskConfidence — drop static geometry variables
-    ortho_t = ortho_t[['MaskConfidence']]
+    # Orthorectify ActiveFireConfidence if present
+    if 'ActiveFireConfidence' in ds_t.data_vars:
+        ortho_afc = apply_ortho_map(
+            ds_t.expand_dims('time'),
+            ortho_map,
+            data_var="ActiveFireConfidence",
+        )
+        ortho_t['ActiveFireConfidence'] = ortho_afc['ActiveFireConfidence']
+
+    # Keep only the data variables
+    ortho_t = ortho_t[data_vars_to_ortho]
 
     slice_path = f"{out_dir}/{t:05d}.nc"
     encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
                 if ortho_t.coords[name].dtype.kind == 'f'}
     encoding['MaskConfidence'] = MC_ENCODING
+    if 'ActiveFireConfidence' in ortho_t.data_vars:
+        encoding['ActiveFireConfidence'] = AFC_ENCODING
     ortho_t.to_netcdf(slice_path, engine='scipy', encoding=encoding)
     ortho_t.close()
     ortho_map.close()
@@ -431,18 +453,33 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
 
 
 def _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals):
-    """Set up dimensions, coordinates, and MaskConfidence variable in an h5netcdf file."""
+    """Set up dimensions, coordinates, and data variables in an h5netcdf file.
+
+    Creates both MaskConfidence (perimeter) and ActiveFireConfidence
+    (instantaneous detection) variables with int8 scale/offset encoding.
+
+    Returns (mc_var, afc_var) — the h5netcdf variable handles for writing.
+    """
     f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
     f.create_variable('time', ('time',), data=time_vals.astype('int64'))
     f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
     f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+
     mc_var = f.create_variable(
         'MaskConfidence', ('time', 'latitude', 'longitude'),
         dtype='int8', fillvalue=np.int8(-1),
     )
     mc_var.attrs['scale_factor'] = np.float32(0.01)
     mc_var.attrs['add_offset'] = np.float32(0.0)
-    return mc_var
+
+    afc_var = f.create_variable(
+        'ActiveFireConfidence', ('time', 'latitude', 'longitude'),
+        dtype='int8', fillvalue=np.int8(-1),
+    )
+    afc_var.attrs['scale_factor'] = np.float32(0.01)
+    afc_var.attrs['add_offset'] = np.float32(0.0)
+
+    return mc_var, afc_var
 
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
@@ -461,16 +498,26 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     carried_attrs = {k: west_ds.attrs[k] for k in west_ds.attrs if k in keep_attrs}
 
     with h5netcdf.File(save_path, 'w') as f:
-        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         for t in tqdm(range(n_times), desc="Compositing", leave=False, delay=1):
-            west_slice = west_ds['MaskConfidence'].isel(time=t).load().values
-            east_slice = east_ds['MaskConfidence'].isel(time=t).load().values
-            merged = np.nanmean(
-                np.stack([west_slice, east_slice], axis=0), axis=0
+            # Composite MaskConfidence
+            west_mc = west_ds['MaskConfidence'].isel(time=t).load().values
+            east_mc = east_ds['MaskConfidence'].isel(time=t).load().values
+            merged_mc = np.nanmean(
+                np.stack([west_mc, east_mc], axis=0), axis=0
             )
-            mc_var[t, :, :] = np.clip(merged / 0.01, 0, 100).astype(np.int8)
-            del west_slice, east_slice, merged
+            mc_var[t, :, :] = np.clip(merged_mc / 0.01, 0, 100).astype(np.int8)
+
+            # Composite ActiveFireConfidence
+            west_afc = west_ds['ActiveFireConfidence'].isel(time=t).load().values
+            east_afc = east_ds['ActiveFireConfidence'].isel(time=t).load().values
+            merged_afc = np.nanmean(
+                np.stack([west_afc, east_afc], axis=0), axis=0
+            )
+            afc_var[t, :, :] = np.clip(merged_afc / 0.01, 0, 100).astype(np.int8)
+
+            del west_mc, east_mc, merged_mc, west_afc, east_afc, merged_afc
 
         f.attrs['pipeline'] = 'composited'
         for k, v in carried_attrs.items():
@@ -500,14 +547,22 @@ def step_smooth(ds, netcdf_dir: str):
 
     # Write directly to final file, one slice at a time
     with h5netcdf.File(save_path, 'w') as f:
-        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         for t in tqdm(range(n_times), desc="Smoothing", leave=False, delay=1):
             ds_t = ds.isel(time=t).load().expand_dims('time')
-            smoothed_t = smooth(ds_t, kernel_radius_m=1700)
-            values = smoothed_t['MaskConfidence'].values[0]
-            mc_var[t, :, :] = np.clip(values / 0.01, 0, 100).astype(np.int8)
-            del ds_t, smoothed_t, values
+
+            # Smooth MaskConfidence
+            smoothed_mc = smooth(ds_t, kernel_radius_m=1700, input_variable='MaskConfidence')
+            mc_values = smoothed_mc['MaskConfidence'].values[0]
+            mc_var[t, :, :] = np.clip(mc_values / 0.01, 0, 100).astype(np.int8)
+
+            # Smooth ActiveFireConfidence
+            smoothed_afc = smooth(ds_t, kernel_radius_m=1700, input_variable='ActiveFireConfidence')
+            afc_values = smoothed_afc['ActiveFireConfidence'].values[0]
+            afc_var[t, :, :] = np.clip(afc_values / 0.01, 0, 100).astype(np.int8)
+
+            del ds_t, smoothed_mc, mc_values, smoothed_afc, afc_values
 
         f.attrs['pipeline'] = 'smoothed'
 
@@ -553,27 +608,37 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     time_vals = trimmed_ds.time.values
 
     with h5netcdf.File(nc_path, 'w') as f:
-        mc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
 
         running_max = None
         for t in tqdm(range(n_times), desc="Writing final", leave=False, delay=1):
-            # Load, round, binarize one slice at a time
-            slice_val = trimmed_ds['MaskConfidence'].isel(time=t).values
-            slice_val = np.round(slice_val, 2)
-            slice_val = np.where(slice_val < 0.95, 0.0, 1.0).astype(np.float32)
+            # MaskConfidence: round, binarize, enforce cummax
+            mc_slice = trimmed_ds['MaskConfidence'].isel(time=t).values
+            mc_slice = np.round(mc_slice, 2)
+            mc_slice = np.where(mc_slice < 0.95, 0.0, 1.0).astype(np.float32)
             # Enforce cumulative max after binarization to guarantee
             # non-decreasing perimeters across time
             if running_max is None:
-                running_max = slice_val.copy()
+                running_max = mc_slice.copy()
             else:
-                np.maximum(running_max, slice_val, out=running_max)
-                slice_val = running_max.copy()
-            mc_var[t, :, :] = np.clip(slice_val / 0.01, 0, 100).astype(np.int8)
-            del slice_val
+                np.maximum(running_max, mc_slice, out=running_max)
+                mc_slice = running_max.copy()
+            mc_var[t, :, :] = np.clip(mc_slice / 0.01, 0, 100).astype(np.int8)
+
+            # ActiveFireConfidence: keep continuous values, no cummax
+            afc_slice = trimmed_ds['ActiveFireConfidence'].isel(time=t).values
+            afc_var[t, :, :] = np.clip(afc_slice / 0.01, 0, 100).astype(np.int8)
+
+            del mc_slice, afc_slice
 
         # Attach metadata as global attrs
         f.attrs['pipeline'] = 'gofer_final'
         f.attrs['fire_name'] = fire_name
+        f.attrs['description'] = (
+            'GOFER fire product. MaskConfidence: cumulative binary perimeter '
+            '(0/1). ActiveFireConfidence: instantaneous hourly fire detection '
+            'confidence (0-1, smoothed and composited).'
+        )
         f.attrs['fire_year'] = str(fire_year)
         f.attrs['fire_acres'] = str(fire_meta['fire_acres'])
         f.attrs['start_date'] = str(pd.Timestamp(time_vals[0]))

@@ -63,11 +63,18 @@ def _prune_invalid_and_pad_missing_timesteps(
     # prune invalid timesteps due to improper storage on goes's end
     target_time = xr.DataArray(dates.tz_localize(None), dims="time", name="time")
     valid_dates = ds.time.isin(target_time)
+
+    # Build fill_value for all data variables
+    fill_values = {
+        name: np.nan for name in ds.data_vars
+        if np.issubdtype(ds[name].dtype, np.floating)
+    }
+
     ds = (ds
         .sel(time=valid_dates)
         .reindex(
             time=target_time,
-            fill_value={data_var: np.nan}
+            fill_value=fill_values
         )
     )
 
@@ -125,7 +132,7 @@ def _cummax(
 def _clean_ds(
     ds: xr.Dataset,
     keep_coords: dict[str] = {'time', 'y', 'x'},
-    keep_vars: dict[str] = {'MaskConfidence', 'goes_imager_projection'},
+    keep_vars: dict[str] = {'MaskConfidence', 'ActiveFireConfidence', 'goes_imager_projection'},
     keep_attrs: dict[str] = {
         'orbital_slot', 'platform_ID', 'dataset_name', 
         'active_fire', 'fire_perimeter', 'fire_name'
@@ -158,8 +165,13 @@ def _clean_ds(
 
 
 def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: str) -> str:
-    """Process a single hour: open, remap, downsample, clean, save."""
-    from gofer.goes_utils import MC_ENCODING
+    """Process a single hour: open, remap, downsample, clean, save.
+
+    Produces a dataset with MaskConfidence (the hourly max confidence,
+    which will later be cummax'd for perimeters) and ActiveFireConfidence
+    (identical values — representing the instantaneous detection for this hour).
+    """
+    from gofer.goes_utils import MC_ENCODING, AFC_ENCODING
 
     ds = _open_and_combine_ds(
         goes_save_dir=goes_save_dir,
@@ -167,10 +179,16 @@ def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: 
     )
     ds = map_fdc_mask_to_confidence(ds)
     ds = _downsample(ds, hour)
+
+    # Create ActiveFireConfidence as a copy of MaskConfidence BEFORE cummax
+    # At this stage, MaskConfidence is just the hourly max — not yet cumulated.
+    ds['ActiveFireConfidence'] = ds['MaskConfidence'].copy()
+
     ds = _clean_ds(ds)
     path = Path(out_dir) / Path(hour.isoformat() + '.nc')
     encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
     encoding['MaskConfidence'] = MC_ENCODING
+    encoding['ActiveFireConfidence'] = AFC_ENCODING
     ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
     ds.close()
     return str(path)
@@ -243,8 +261,8 @@ def aggregate(
     dataset_paths.sort()
 
     # Phase 2: Sequential cummax (if perimeter mode)
-    from gofer.goes_utils import MC_ENCODING
-    _mc_encoding = {'MaskConfidence': MC_ENCODING}
+    from gofer.goes_utils import MC_ENCODING, AFC_ENCODING
+    _encoding = {'MaskConfidence': MC_ENCODING, 'ActiveFireConfidence': AFC_ENCODING}
 
     if is_perimeter:
         running_cummax = None
@@ -252,13 +270,14 @@ def aggregate(
                          delay=1, desc="Applying cummax"):
             ds = xr.open_dataset(str(path)).load()
             ds, running_cummax = _cummax(ds, data_var, running_cummax)
+            # ActiveFireConfidence is NOT cummax'd — it stays as-is (per-hour)
             ds = ds.assign_attrs(
                 fire_name=fire_name,
                 perimeter="True",
                 description="Perimeter product, containing the cumulative max "
                 "of the confidences of the past active fire pixels"
             )
-            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_mc_encoding)
+            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_encoding)
             ds.close()
     else:
         # Just tag attributes for active fire mode
@@ -270,7 +289,7 @@ def aggregate(
                 description="Active fire product, containing the "
                 "the confidence of the current active fire pixels"
             )
-            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_mc_encoding)
+            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_encoding)
             ds.close()
 
     # Phase 3: Combine and impute
@@ -287,6 +306,9 @@ def aggregate(
     # impute with 0 for active fire
     if is_perimeter:
         ds[data_var] = ds[data_var].ffill(dim='time')
+        # ActiveFireConfidence is instantaneous: fill gaps with 0
+        if 'ActiveFireConfidence' in ds.data_vars:
+            ds['ActiveFireConfidence'] = ds['ActiveFireConfidence'].fillna(0)
     else:
         ds[data_var] = ds[data_var].fillna(0)
 

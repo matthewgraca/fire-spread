@@ -42,6 +42,17 @@ MC_ENCODING = {
     '_FillValue': np.int8(-1),
 }
 
+AFC_ENCODING = {
+    'dtype': 'int8',
+    'scale_factor': np.float32(0.01),
+    'add_offset': np.float32(0.0),
+    '_FillValue': np.int8(-1),
+}
+
+# Variable names used throughout the pipeline
+PERIMETER_VAR = 'MaskConfidence'
+ACTIVE_FIRE_VAR = 'ActiveFireConfidence'
+
 # Operational date ranges for each GOES satellite on AWS S3.
 # Each entry maps a bucket name to (position, start_date, end_date).
 # end_date of None means the satellite is still active.
@@ -202,7 +213,7 @@ def eval_and_save_nc(
     save_path: str,
     chunk_size: tuple | None = None,
     chunks: dict | None = None,
-    data_var: str = 'MaskConfidence',
+    data_var: str | list[str] = 'MaskConfidence',
     desc: str = '...',
     verbose: bool = True
 ):
@@ -221,9 +232,12 @@ def eval_and_save_nc(
     '''
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # Normalize data_var to a list
+    data_vars = [data_var] if isinstance(data_var, str) else data_var
+
     encoding = {}
     for name, da in ds.variables.items():
-        # clear encodings, only MaskConfidence encodings matter
+        # clear encodings, only data variable encodings matter
         da.encoding.clear()
         enc = {}
 
@@ -232,7 +246,7 @@ def eval_and_save_nc(
             enc["_FillValue"] = np.nan
 
         # pass in a chunk size. Unfortunately, to_netcdf doesn't infer this
-        if name == data_var:
+        if name in data_vars:
             enc["dtype"] = "uint8"
             enc["scale_factor"] = np.float32(0.01)
             enc["add_offset"] = np.float32(0.0)
