@@ -53,14 +53,14 @@ def _extent_from_ds(ds: xr.Dataset, buffer: float = 0.05) -> list:
     ]
 
 
-def _setup_basemap(extent: list):
+def _setup_basemap(extent: list, zoom: int = 12):
     tiler = CartoDBTiles(style='rastertiles/voyager', cache=True)
     fig, ax = plt.subplots(
         1, 1, figsize=(16, 12),
         subplot_kw={'projection': ccrs.PlateCarree()},
         layout='constrained'
     )
-    ax.add_image(tiler, 12)
+    ax.add_image(tiler, zoom)
     ax.set_extent(extent, crs=ccrs.PlateCarree())
     return fig, ax
 
@@ -94,6 +94,7 @@ def plot_progression(
     save_path: str = None,
     data_var: str = "MaskConfidence",
     step: int = 1,
+    zoom: int = 12,
 ):
     """
     Plot GOFER perimeter progression with colored edges on a black
@@ -110,9 +111,10 @@ def plot_progression(
         save_path: If provided, save the figure to this path.
         data_var: Name of the binary fire variable in ds.
         step: Plot every Nth timestep. 1 = all, 12 = every 12th.
+        zoom: Basemap tile zoom level (higher = sharper, slower). Default 12.
     """
     extent = _extent_from_ds(ds)
-    fig, ax = _setup_basemap(extent)
+    fig, ax = _setup_basemap(extent, zoom=zoom)
     cmap = _fire_cmap()
 
     n = len(gofer_gdf)
@@ -165,6 +167,7 @@ def plot_progression_filled(
     title: str = "GOFER Fire Progression",
     save_path: str = None,
     data_var: str = "MaskConfidence",
+    zoom: int = 12,
 ):
     """
     Plot GOFER perimeter progression with filled facecolors.
@@ -180,9 +183,10 @@ def plot_progression_filled(
         title: Plot title.
         save_path: If provided, save the figure to this path.
         data_var: Name of the binary fire variable in ds.
+        zoom: Basemap tile zoom level (higher = sharper, slower). Default 12.
     """
     extent = _extent_from_ds(ds)
-    fig, ax = _setup_basemap(extent)
+    fig, ax = _setup_basemap(extent, zoom=zoom)
     cmap = _fire_cmap()
 
     n = len(gofer_gdf)
@@ -233,6 +237,7 @@ def plot_perimeter_comparison(
     calfire_gdf: gpd.GeoDataFrame,
     title: str = "GOFER vs FRAP — Final Perimeter Comparison",
     save_path: str = None,
+    zoom: int = 12,
 ):
     """
     Compare the final fire perimeter from GOFER against the FRAP/CalFire
@@ -248,9 +253,10 @@ def plot_perimeter_comparison(
         calfire_gdf: CalFire/FRAP reference perimeter GeoDataFrame.
         title: Plot title.
         save_path: If provided, save the figure to this path.
+        zoom: Basemap tile zoom level (higher = sharper, slower). Default 12.
     """
     extent = _extent_from_ds(ds)
-    fig, ax = _setup_basemap(extent)
+    fig, ax = _setup_basemap(extent, zoom=zoom)
 
     # Get final GOFER perimeter
     if 'time' in gofer_gdf.columns and len(gofer_gdf) > 1:
