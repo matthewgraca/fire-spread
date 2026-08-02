@@ -165,13 +165,8 @@ def _clean_ds(
 
 
 def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: str) -> str:
-    """Process a single hour: open, remap, downsample, clean, save.
-
-    Produces a dataset with MaskConfidence (the hourly max confidence,
-    which will later be cummax'd for perimeters) and ActiveFireConfidence
-    (identical values — representing the instantaneous detection for this hour).
-    """
-    from gofer.goes_utils import MC_ENCODING, AFC_ENCODING
+    """Process a single hour: open, remap, downsample, clean, save."""
+    from gofer.goes_utils import MC_ENCODING
 
     ds = _open_and_combine_ds(
         goes_save_dir=goes_save_dir,
@@ -179,16 +174,10 @@ def _process_hour(goes_save_dir: str, goes_filepaths: list[str], hour, out_dir: 
     )
     ds = map_fdc_mask_to_confidence(ds)
     ds = _downsample(ds, hour)
-
-    # Create ActiveFireConfidence as a copy of MaskConfidence BEFORE cummax
-    # At this stage, MaskConfidence is just the hourly max — not yet cumulated.
-    ds['ActiveFireConfidence'] = ds['MaskConfidence'].copy()
-
     ds = _clean_ds(ds)
     path = Path(out_dir) / Path(hour.isoformat() + '.nc')
     encoding = {name: {'dtype': 'float32'} for name in ds.coords if ds.coords[name].dtype.kind == 'f'}
     encoding['MaskConfidence'] = MC_ENCODING
-    encoding['ActiveFireConfidence'] = AFC_ENCODING
     ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=encoding)
     ds.close()
     return str(path)
@@ -261,6 +250,7 @@ def aggregate(
     dataset_paths.sort()
 
     # Phase 2: Sequential cummax (if perimeter mode)
+    # ActiveFireConfidence is created here from the pre-cummax hourly values.
     from gofer.goes_utils import MC_ENCODING, AFC_ENCODING
     _encoding = {'MaskConfidence': MC_ENCODING, 'ActiveFireConfidence': AFC_ENCODING}
 
@@ -269,8 +259,9 @@ def aggregate(
         for path in tqdm(dataset_paths, disable=not verbose, leave=False,
                          delay=1, desc="Applying cummax"):
             ds = xr.open_dataset(str(path)).load()
+            # Preserve the pre-cummax value as ActiveFireConfidence
+            ds['ActiveFireConfidence'] = ds[data_var].copy()
             ds, running_cummax = _cummax(ds, data_var, running_cummax)
-            # ActiveFireConfidence is NOT cummax'd — it stays as-is (per-hour)
             ds = ds.assign_attrs(
                 fire_name=fire_name,
                 perimeter="True",
@@ -280,6 +271,7 @@ def aggregate(
             ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_encoding)
             ds.close()
     else:
+        _encoding_af = {'MaskConfidence': MC_ENCODING}
         # Just tag attributes for active fire mode
         for path in dataset_paths:
             ds = xr.open_dataset(str(path)).load()
@@ -289,7 +281,7 @@ def aggregate(
                 description="Active fire product, containing the "
                 "the confidence of the current active fire pixels"
             )
-            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_encoding)
+            ds.to_netcdf(str(path), mode="w", engine="scipy", encoding=_encoding_af)
             ds.close()
 
     # Phase 3: Combine and impute

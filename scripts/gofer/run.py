@@ -275,7 +275,13 @@ def process_fire(
 
 def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
                    dates: pd.DatetimeIndex, fire_name: str, threads: int):
-    """Remap, temporally downsample, and aggregate both satellites."""
+    """Remap, temporally downsample, and aggregate both satellites.
+
+    Writes the aggregated dataset slice-by-slice to avoid OOM from
+    materializing the full dask graph at once.
+    """
+    import h5netcdf
+
     results = {}
     for sat in ['west', 'east']:
         tqdm.write(S.substep(f"Aggregating GOES-{sat.capitalize()}..."))
@@ -289,15 +295,41 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             verbose=True,
             max_workers=threads,
         )
-        ds = eval_and_save_nc(
-            ds,
-            chunk_size=(1, 1500, 2500),
-            save_path=save_path,
-            chunks='auto',
-            data_var=['MaskConfidence', 'ActiveFireConfidence'],
-            desc=f'{sat} aggregation',
-            verbose=True,
-        )
+
+        # Write slice-by-slice to avoid OOM
+        n_times = ds.sizes['time']
+        lat_vals = ds['y'].values if 'y' in ds.coords else ds['latitude'].values
+        lon_vals = ds['x'].values if 'x' in ds.coords else ds['longitude'].values
+        time_vals = ds['time'].values
+        lat_name = 'y' if 'y' in ds.coords else 'latitude'
+        lon_name = 'x' if 'x' in ds.coords else 'longitude'
+
+        with h5netcdf.File(save_path, 'w') as f:
+            handles = _create_h5_netcdf(
+                f, n_times, (lat_vals, lon_vals), time_vals,
+                data_vars=['MaskConfidence', 'ActiveFireConfidence'],
+                spatial_names=(lat_name, lon_name),
+            )
+            mc_var = handles['MaskConfidence']
+            afc_var = handles['ActiveFireConfidence']
+
+            for t in tqdm(range(n_times), desc=f"Writing {sat}", leave=False, delay=1):
+                mc_slice = ds['MaskConfidence'].isel(time=t).load().values
+                mc_var[t, :, :] = np.clip(mc_slice / 0.01, 0, 100).astype(np.int8)
+
+                if 'ActiveFireConfidence' in ds.data_vars:
+                    afc_slice = ds['ActiveFireConfidence'].isel(time=t).load().values
+                    afc_var[t, :, :] = np.clip(afc_slice / 0.01, 0, 100).astype(np.int8)
+                    del afc_slice
+
+                del mc_slice
+
+            f.attrs['fire_name'] = fire_name
+
+        ds.close()
+        gc.collect()
+
+        ds = xr.open_dataset(save_path, chunks={'time': 1})
         tqdm.write(S.substep(f"Saved to {save_path}"))
         results[sat] = ds
     return results['west'], results['east']
@@ -452,34 +484,49 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     return slice_path
 
 
-def _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals):
+def _create_h5_netcdf(
+    f,
+    n_times: int,
+    spatial_vals: tuple[np.ndarray, np.ndarray],
+    time_vals: np.ndarray,
+    data_vars: list[str],
+    spatial_names: tuple[str, str] = ('latitude', 'longitude'),
+) -> dict:
     """Set up dimensions, coordinates, and data variables in an h5netcdf file.
 
-    Creates both MaskConfidence (perimeter) and ActiveFireConfidence
-    (instantaneous detection) variables with int8 scale/offset encoding.
+    Args:
+        f: An open h5netcdf.File in write mode.
+        n_times: Number of timesteps.
+        spatial_vals: (y_array, x_array) — the spatial coordinate values.
+        time_vals: Time coordinate values (datetime64).
+        data_vars: Names of the data variables to create (all get int8
+            scale/offset encoding: scale=0.01, offset=0.0).
+        spatial_names: Names for the spatial dimensions/coordinates.
+            Default ('latitude', 'longitude'). Use ('y', 'x') for
+            pre-ortho GOES fixed-grid data.
 
-    Returns (mc_var, afc_var) — the h5netcdf variable handles for writing.
+    Returns:
+        dict mapping variable name → h5netcdf variable handle for writing.
     """
-    f.dimensions = {'time': n_times, 'latitude': len(lat_vals), 'longitude': len(lon_vals)}
+    y_name, x_name = spatial_names
+    y_vals, x_vals = spatial_vals
+
+    f.dimensions = {'time': n_times, y_name: len(y_vals), x_name: len(x_vals)}
     f.create_variable('time', ('time',), data=time_vals.astype('int64'))
-    f.create_variable('latitude', ('latitude',), data=lat_vals.astype('float32'))
-    f.create_variable('longitude', ('longitude',), data=lon_vals.astype('float32'))
+    f.create_variable(y_name, (y_name,), data=y_vals.astype('float32'))
+    f.create_variable(x_name, (x_name,), data=x_vals.astype('float32'))
 
-    mc_var = f.create_variable(
-        'MaskConfidence', ('time', 'latitude', 'longitude'),
-        dtype='int8', fillvalue=np.int8(-1),
-    )
-    mc_var.attrs['scale_factor'] = np.float32(0.01)
-    mc_var.attrs['add_offset'] = np.float32(0.0)
+    handles = {}
+    for var_name in data_vars:
+        var = f.create_variable(
+            var_name, ('time', y_name, x_name),
+            dtype='int8', fillvalue=np.int8(-1),
+        )
+        var.attrs['scale_factor'] = np.float32(0.01)
+        var.attrs['add_offset'] = np.float32(0.0)
+        handles[var_name] = var
 
-    afc_var = f.create_variable(
-        'ActiveFireConfidence', ('time', 'latitude', 'longitude'),
-        dtype='int8', fillvalue=np.int8(-1),
-    )
-    afc_var.attrs['scale_factor'] = np.float32(0.01)
-    afc_var.attrs['add_offset'] = np.float32(0.0)
-
-    return mc_var, afc_var
+    return handles
 
 
 def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
@@ -498,7 +545,12 @@ def step_composite(west_ds, east_ds, dates: pd.DatetimeIndex, netcdf_dir: str):
     carried_attrs = {k: west_ds.attrs[k] for k in west_ds.attrs if k in keep_attrs}
 
     with h5netcdf.File(save_path, 'w') as f:
-        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        _handles = _create_h5_netcdf(
+            f, n_times, (lat_vals, lon_vals), time_vals,
+            data_vars=['MaskConfidence', 'ActiveFireConfidence'],
+        )
+        mc_var = _handles['MaskConfidence']
+        afc_var = _handles['ActiveFireConfidence']
 
         for t in tqdm(range(n_times), desc="Compositing", leave=False, delay=1):
             # Composite MaskConfidence
@@ -547,7 +599,12 @@ def step_smooth(ds, netcdf_dir: str):
 
     # Write directly to final file, one slice at a time
     with h5netcdf.File(save_path, 'w') as f:
-        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        _handles = _create_h5_netcdf(
+            f, n_times, (lat_vals, lon_vals), time_vals,
+            data_vars=['MaskConfidence', 'ActiveFireConfidence'],
+        )
+        mc_var = _handles['MaskConfidence']
+        afc_var = _handles['ActiveFireConfidence']
 
         for t in tqdm(range(n_times), desc="Smoothing", leave=False, delay=1):
             ds_t = ds.isel(time=t).load().expand_dims('time')
@@ -608,7 +665,12 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     time_vals = trimmed_ds.time.values
 
     with h5netcdf.File(nc_path, 'w') as f:
-        mc_var, afc_var = _create_mc_netcdf(f, n_times, lat_vals, lon_vals, time_vals)
+        _handles = _create_h5_netcdf(
+            f, n_times, (lat_vals, lon_vals), time_vals,
+            data_vars=['MaskConfidence', 'ActiveFireConfidence'],
+        )
+        mc_var = _handles['MaskConfidence']
+        afc_var = _handles['ActiveFireConfidence']
 
         running_max = None
         for t in tqdm(range(n_times), desc="Writing final", leave=False, delay=1):
