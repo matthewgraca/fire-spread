@@ -313,16 +313,28 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
             mc_var = handles['MaskConfidence']
             afc_var = handles['ActiveFireConfidence']
 
-            for t in tqdm(range(n_times), desc=f"Writing {sat}", leave=False, delay=1):
-                mc_slice = ds['MaskConfidence'].isel(time=t).load().values
-                mc_var[t, :, :] = np.clip(mc_slice / 0.01, 0, 100).astype(np.int8)
+            # Batch load to amortize file-open overhead from open_mfdataset.
+            # Each frame is ~15 MB × 2 vars = 30 MB; batch of 100 = ~3 GB.
+            batch_size = 100
+            has_afc = 'ActiveFireConfidence' in ds.data_vars
+            for batch_start in tqdm(range(0, n_times, batch_size),
+                                    desc=f"Writing {sat}", leave=False, delay=1):
+                batch_end = min(batch_start + batch_size, n_times)
+                batch = ds.isel(time=slice(batch_start, batch_end)).load()
 
-                if 'ActiveFireConfidence' in ds.data_vars:
-                    afc_slice = ds['ActiveFireConfidence'].isel(time=t).load().values
-                    afc_var[t, :, :] = np.clip(afc_slice / 0.01, 0, 100).astype(np.int8)
-                    del afc_slice
+                mc_batch = batch['MaskConfidence'].values
+                mc_var[batch_start:batch_end, :, :] = np.clip(
+                    mc_batch / 0.01, 0, 100
+                ).astype(np.int8)
 
-                del mc_slice
+                if has_afc:
+                    afc_batch = batch['ActiveFireConfidence'].values
+                    afc_var[batch_start:batch_end, :, :] = np.clip(
+                        afc_batch / 0.01, 0, 100
+                    ).astype(np.int8)
+                    del afc_batch
+
+                del mc_batch, batch
 
             f.attrs['fire_name'] = fire_name
 
