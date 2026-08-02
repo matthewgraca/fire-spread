@@ -315,7 +315,7 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
 
             # Batch load to amortize file-open overhead from open_mfdataset.
             # Each frame is ~15 MB × 2 vars = 30 MB; batch of 100 = ~3 GB.
-            batch_size = 100
+            batch_size = 200
             has_afc = 'ActiveFireConfidence' in ds.data_vars
             for batch_start in tqdm(range(0, n_times, batch_size),
                                     desc=f"Writing {sat}", leave=False, delay=1):
@@ -338,15 +338,20 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
 
             f.attrs['fire_name'] = fire_name
 
-            # Preserve scalar metadata variables (e.g., goes_imager_projection)
+            # Preserve non-spatial metadata variables (e.g., goes_imager_projection)
             for var_name in ds.data_vars:
                 if var_name in ('MaskConfidence', 'ActiveFireConfidence'):
                     continue
-                var_data = ds[var_name].load()
-                if var_data.dims == ():  # scalar variable
-                    scalar_var = f.create_variable(var_name, (), data=var_data.values)
-                    for attr_name, attr_val in var_data.attrs.items():
-                        scalar_var.attrs[attr_name] = attr_val
+                var_data = ds[var_name]
+                # Write as scalar — these are satellite metadata constants
+                # that may have been broadcast along time by open_mfdataset
+                if 'time' in var_data.dims:
+                    val = var_data.isel(time=0).load().values
+                else:
+                    val = var_data.load().values
+                scalar_var = f.create_variable(var_name, (), data=val.item())
+                for attr_name, attr_val in var_data.attrs.items():
+                    scalar_var.attrs[attr_name] = attr_val
 
             # Preserve all dataset-level attributes
             for attr_name, attr_val in ds.attrs.items():
