@@ -338,6 +338,20 @@ def step_aggregate(goes_save_dir: str, temp_dir: str, netcdf_dir: str,
 
             f.attrs['fire_name'] = fire_name
 
+            # Preserve scalar metadata variables (e.g., goes_imager_projection)
+            for var_name in ds.data_vars:
+                if var_name in ('MaskConfidence', 'ActiveFireConfidence'):
+                    continue
+                var_data = ds[var_name].load()
+                if var_data.dims == ():  # scalar variable
+                    scalar_var = f.create_variable(var_name, (), data=var_data.values)
+                    for attr_name, attr_val in var_data.attrs.items():
+                        scalar_var.attrs[attr_name] = attr_val
+
+            # Preserve all dataset-level attributes
+            for attr_name, attr_val in ds.attrs.items():
+                f.attrs[attr_name] = str(attr_val)
+
         ds.close()
         gc.collect()
 
