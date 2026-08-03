@@ -507,12 +507,16 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
         ortho_t[var].encoding.clear()
 
     slice_path = f"{out_dir}/{t:05d}.nc"
-    encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
-                if ortho_t.coords[name].dtype.kind == 'f'}
-    encoding['MaskConfidence'] = MC_ENCODING
-    if 'ActiveFireConfidence' in ortho_t.data_vars:
-        encoding['ActiveFireConfidence'] = AFC_ENCODING
-    encoding['time'] = {'units': 'seconds since 1970-01-01', 'dtype': 'int32'}
+    # scipy/netCDF3 does not support scale_factor/add_offset encoding.
+    # Write as float32 — these are ephemeral temp files that get re-encoded
+    # downstream by eval_and_save_nc with h5netcdf.
+    encoding = {}
+    for name in ortho_t.coords:
+        if ortho_t.coords[name].dtype.kind == 'f':
+            encoding[name] = {'dtype': 'float32'}
+    encoding['time'] = {'dtype': 'int32'}
+    for name in ortho_t.data_vars:
+        encoding[name] = {'dtype': 'float32'}
     ortho_t.to_netcdf(slice_path, engine='scipy', encoding=encoding)
     ortho_t.close()
     ortho_map.close()
