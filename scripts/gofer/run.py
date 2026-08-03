@@ -502,6 +502,10 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     # Keep only the data variables
     ortho_t = ortho_t[data_vars_to_ortho]
 
+    # Clear residual encodings from source file (scipy backend is strict)
+    for var in ortho_t.variables:
+        ortho_t[var].encoding.clear()
+
     slice_path = f"{out_dir}/{t:05d}.nc"
     encoding = {name: {'dtype': 'float32'} for name in ortho_t.coords
                 if ortho_t.coords[name].dtype.kind == 'f'}
