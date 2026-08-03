@@ -508,6 +508,7 @@ def _ortho_slice(source_path: str, ortho_map_path: str, t: int, out_dir: str) ->
     encoding['MaskConfidence'] = MC_ENCODING
     if 'ActiveFireConfidence' in ortho_t.data_vars:
         encoding['ActiveFireConfidence'] = AFC_ENCODING
+    encoding['time'] = {'units': 'seconds since 1970-01-01', 'dtype': 'int32'}
     ortho_t.to_netcdf(slice_path, engine='scipy', encoding=encoding)
     ortho_t.close()
     ortho_map.close()
