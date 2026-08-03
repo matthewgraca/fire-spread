@@ -761,7 +761,6 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     ds.close()
     gc.collect()
 
-    final_ds = xr.open_dataset(nc_path, chunks={'time': 1})
     tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
     # Compute fire metrics via streaming (batched reads from disk to avoid OOM)
