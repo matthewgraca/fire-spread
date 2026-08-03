@@ -552,7 +552,15 @@ def _create_h5_netcdf(
     y_vals, x_vals = spatial_vals
 
     f.dimensions = {'time': n_times, y_name: len(y_vals), x_name: len(x_vals)}
-    f.create_variable('time', ('time',), data=time_vals.astype('int64'))
+
+    # Store time as minutes since epoch with CF-compliant units attribute.
+    # Minutes (not seconds) allows int32 to cover ~4,000 years while
+    # supporting sub-hourly precision if needed.
+    time_minutes = (time_vals - np.datetime64('1970-01-01T00:00:00', 'ns')) // np.timedelta64(1, 'm')
+    time_var = f.create_variable('time', ('time',), data=time_minutes.astype('int32'))
+    time_var.attrs['units'] = 'minutes since 1970-01-01'
+    time_var.attrs['calendar'] = 'proleptic_gregorian'
+
     f.create_variable(y_name, (y_name,), data=y_vals.astype('float32'))
     f.create_variable(x_name, (x_name,), data=x_vals.astype('float32'))
 
