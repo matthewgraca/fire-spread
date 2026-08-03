@@ -765,23 +765,61 @@ def step_final(ds, fire_meta: dict, netcdf_dir:str, out_dir: str, calfire_gdf=No
     tqdm.write(S.substep(f"Saved: {nc_path}", last_step=True))
 
     # Compute fire metrics
-    # fline_r, fspread_mae, fspread_awe always computed from MaskConfidence.
-    # fline_c computed automatically since ActiveFireConfidence is present.
+    # fline_r, fspread_mae, fspread_awe computed from MaskConfidence.
+    # fline_c requires ActiveFireConfidence — computed if memory allows.
     tqdm.write(S.substep("Computing fire metrics...", last_step=True))
-    from gofer.metrics import compute_metrics
-    metrics_ds = compute_metrics(final_ds.load())
-    final_ds.close()
+    from gofer.metrics import fline_r, fspread_mae, fspread_awe, fline_c
 
-    # Merge metrics into the final dataset and re-save
-    final_ds = xr.open_dataset(nc_path).load()
-    final_ds.close()
-    for var in metrics_ds.data_vars:
-        final_ds = final_ds.assign(**{var: metrics_ds[var]})
+    # Load only MaskConfidence (binary int8 → bool, ~1 byte/pixel)
+    final_ds = xr.open_dataset(nc_path)
+    mc_ds = final_ds[['MaskConfidence']].load()
 
-    final_ds.to_netcdf(nc_path, mode='w', engine='h5netcdf')
+    fl_r = fline_r(mc_ds)
+    mae = fspread_mae(mc_ds)
+    awe = fspread_awe(mc_ds, fline_r_da=fl_r)
+
+    # Compute fline_c from ActiveFireConfidence
+    fl_c = None
+    if 'ActiveFireConfidence' in final_ds.data_vars:
+        afc_data = final_ds['ActiveFireConfidence'].values
+        fl_c = fline_c(mc_ds, confidence=afc_data,
+                       confidence_var='ActiveFireConfidence')
+        del afc_data
+
+    final_ds.close()
+    del mc_ds
+    gc.collect()
+
+    # Append 1D metrics directly to the existing file (no spatial reload)
+    with h5netcdf.File(nc_path, 'a') as f:
+        # fline_r — indexed by time
+        v = f.create_variable('fline_r', ('time',), data=fl_r.values.astype('float32'))
+        v.attrs['units'] = 'km'
+        v.attrs['long_name'] = 'Retrospective active fire line length'
+
+        # fspread_mae and fspread_awe — indexed by time_mid
+        mid_times = mae.coords['time_mid'].values
+        time_mid_minutes = (mid_times - np.datetime64('1970-01-01T00:00:00', 'ns')) // np.timedelta64(1, 'm')
+        f.dimensions['time_mid'] = len(mid_times)
+        tv = f.create_variable('time_mid', ('time_mid',), data=time_mid_minutes.astype('int32'))
+        tv.attrs['units'] = 'minutes since 1970-01-01'
+        tv.attrs['calendar'] = 'proleptic_gregorian'
+
+        v = f.create_variable('fspread_mae', ('time_mid',), data=mae.values.astype('float32'))
+        v.attrs['units'] = 'km/h'
+        v.attrs['long_name'] = 'Fire spread rate - maximum axis of expansion'
+
+        v = f.create_variable('fspread_awe', ('time_mid',), data=awe.values.astype('float32'))
+        v.attrs['units'] = 'km/h'
+        v.attrs['long_name'] = 'Fire spread rate - area-weighted expansion'
+
+        if fl_c is not None:
+            v = f.create_variable('fline_c', ('time',), data=fl_c.values.astype('float32'))
+            v.attrs['units'] = 'km'
+            v.attrs['long_name'] = 'Concurrent active fire line length'
+
     final_ds = xr.open_dataset(nc_path, chunks={'time': 1})
-
-    metric_names = ', '.join(metrics_ds.data_vars)
+    metric_names = 'fline_r, fspread_mae, fspread_awe' + (', fline_c' if fl_c is not None else '')
     tqdm.write(S.substep(f"Metrics added: {metric_names}", last_step=True))
 
     # Vectorize
