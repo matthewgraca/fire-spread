@@ -160,8 +160,12 @@ def fline_c(
     if confidence is not None:
         if isinstance(confidence, xr.Dataset):
             conf_data = confidence[confidence_var].values
-        else:
+        elif isinstance(confidence, xr.DataArray):
             conf_data = confidence.values
+        elif isinstance(confidence, np.ndarray):
+            conf_data = confidence
+        else:
+            conf_data = np.asarray(confidence)
     elif confidence_var in ds.data_vars:
         conf_data = ds[confidence_var].values
     else:
