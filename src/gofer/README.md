@@ -104,3 +104,24 @@ These methods are responsible for converting our raster into polygons. If the go
 The GOFER algorithm follows Google and applies a 1:2 margin of error for the vectors. That is, if the product is at a 50m resolution, the polygons drawn will have a 100m margin of error.
 
 For us, we currently use a 90m DEM, so our polygons will have a 180m margin of error. We're not too pressed about this since the error bar for GOFER-Combined is 750m±210m, and the GOES images themselves are 2000m x 2000m.
+
+# Metrics
+There are a few metrics that we collect regarding the behavior of the fires. 
+
+![](https://essd.copernicus.org/articles/16/1395/2024/essd-16-1395-2024-f05-web.png)
+
+1. Active fire line -- concurrent
+    - Definition: Sections of the perimeter that overlap with concurrent active fire detections.
+    - Asks: Where is the active fire in the perimeter? Essentially, the fire front.
+    - Why not just active fire? Because we care about perimeter, not whether the area that was previous burning is still burning.
+2. Active fire line -- retrospective
+    - Definition: Sections of the perimter that led to future expansion of the perimeter.
+    - Asks: Where on the perimeter did the active fire result in perimeter growth?
+    - Why not concurrent? Because active fire on the perimeter doesn't always result in growth of the perimeter. If we want to measure what portions o fthe active fire line lead to growth, we should know if the perimeter is actively moving, not just hot. However, this can only be calculated in retrospect, so is not possible as an active product.
+3. Fire spread rate -- maximum axis of expansion
+    - Definition: Maximum shortest distance.
+    - Asks: Where is the fire growing most aggressively?
+4. Fire spread rate -- area-weighted expansion.
+    - Definition: Area of growth normalized by the retrospective active fire line.
+    - Asks: How much is the fire growing from the active fire line?
+    - Why not just maximum axis of expansion? Because a fire growing unevenly (finger) or actually growing overall. Having both gives the full picture of growth in just two numbers.
